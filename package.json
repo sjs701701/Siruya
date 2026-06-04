@@ -1,0 +1,64 @@
+{
+  "name": "pocket",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "lint": "eslint .",
+    "start": "react-native start",
+    "test": "jest",
+    "build:ios": "react-native bundle --entry-file='index.js' --bundle-output='./ios/main.jsbundle' --dev=false --platform='ios'"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/datetimepicker": "latest",
+    "@react-native/new-app-screen": "0.85.3",
+    "@react-navigation/bottom-tabs": "latest",
+    "@react-navigation/native": "latest",
+    "@react-navigation/native-stack": "latest",
+    "@react-navigation/stack": "latest",
+    "@tanstack/react-query": "latest",
+    "axios": "latest",
+    "date-fns": "latest",
+    "react": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-dialog": "latest",
+    "react-native-gesture-handler": "latest",
+    "react-native-modal-datetime-picker": "latest",
+    "react-native-rename": "latest",
+    "react-native-safe-area-context": "^5.5.2",
+    "react-native-screens": "latest",
+    "react-native-version-check": "latest",
+    "react-native-wifi-reborn": "^4.13.6"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "20.1.0",
+    "@react-native-community/cli-platform-android": "20.1.0",
+    "@react-native-community/cli-platform-ios": "20.1.0",
+    "@react-native/babel-preset": "0.85.3",
+    "@react-native/eslint-config": "0.85.3",
+    "@react-native/jest-preset": "0.85.3",
+    "@react-native/metro-config": "0.85.3",
+    "@react-native/typescript-config": "0.85.3",
+    "@types/jest": "^29.5.13",
+    "@types/react": "^19.2.0",
+    "@types/react-test-renderer": "^19.1.0",
+    "eslint": "^8.19.0",
+    "jest": "^29.6.3",
+    "prettier": "2.8.8",
+    "react-test-renderer": "19.2.3",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": "^20.19.4 || ^22.13.0 || ^24.3.0 || >= 25.0.0"
+  },
+  "rnpm": {
+    "assets": [
+      "./assets/fonts/"
+    ]
+  }
+}
