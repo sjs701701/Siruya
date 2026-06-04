@@ -43,7 +43,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
   const product = getProductDefinition(device?.type ?? 'sprout-grower');
 
   useEffect(() => {
-    if (!deviceId || !product.firmwareManifestUrl) {
+    if (!deviceId || device?.isDemo || !product.firmwareManifestUrl) {
       return;
     }
 
@@ -91,7 +91,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
     return () => {
       cancelled = true;
     };
-  }, [deviceId, onUpdate, product.firmwareManifestUrl]);
+  }, [device?.isDemo, deviceId, onUpdate, product.firmwareManifestUrl]);
 
   if (!device) {
     return null;
@@ -159,6 +159,27 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
     }));
   };
 
+  const markFirmwareUpdated = () => {
+    onUpdate(device.id, current => {
+      const currentRuntime = current.runtime ?? createEmptyRuntime();
+      const latestVersion =
+        currentRuntime.latestFirmwareVersion ??
+        currentRuntime.firmwareVersion ??
+        '1.0.4';
+
+      return {
+        ...current,
+        runtime: {
+          ...currentRuntime,
+          firmwareVersion: latestVersion,
+          latestFirmwareVersion: latestVersion,
+          firmwareUpdateStatus: 'updated',
+          firmwareUpdateProgress: 100,
+        },
+      };
+    });
+  };
+
   const runFirmwareUpdate = async () => {
     if (!canUpdateFirmware || pendingCommand) {
       return;
@@ -177,7 +198,12 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
 
             try {
               await sendFirmwareUpdateCommand(device);
-              markFirmwareUpdating(1);
+              if (device.isDemo) {
+                await new Promise<void>(resolve => setTimeout(resolve, 500));
+                markFirmwareUpdated();
+              } else {
+                markFirmwareUpdating(1);
+              }
             } catch {
               onUpdate(device.id, current => ({
                 ...current,
@@ -244,6 +270,11 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
             <Text style={styles.meta}>
               {device.room} · {device.status === 'online' ? '온라인' : '오프라인'}
             </Text>
+            {device.isDemo && (
+              <View style={styles.demoBadge}>
+                <Text style={styles.demoBadgeText}>화면 확인용 더미 기기</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.statusPanel}>
@@ -534,6 +565,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     marginTop: 6,
+  },
+  demoBadge: {
+    backgroundColor: '#cffafe',
+    borderRadius: 6,
+    marginTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  demoBadgeText: {
+    color: '#155e75',
+    fontSize: 12,
+    fontWeight: '900',
   },
   statusPanel: {
     flexDirection: 'row',

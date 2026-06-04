@@ -36,6 +36,7 @@ export type DeviceRuntime = {
 export type Device = {
   id: string;
   hardwareId?: string;
+  isDemo?: boolean;
   name: string;
   type: DeviceType;
   room: string;

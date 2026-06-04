@@ -17,6 +17,13 @@ import {
   getProductDefinition,
   productDefinitions,
 } from './deviceRegistry';
+import {
+  createDemoProvisionedDevice,
+  demoDeviceSetupSsid,
+  demoHardwareId,
+  demoProvisionedIp,
+  demoWifiNetworks,
+} from './demoDevices';
 import {LabeledInput} from './DeviceFormFields';
 import {Device, DeviceType, ProvisionStep} from './types';
 import {
@@ -39,6 +46,8 @@ type Props = {
 };
 
 const steps: ProvisionStep[] = ['select', 'connect', 'wifi', 'name'];
+const demoDelay = (ms: number) =>
+  new Promise<void>(resolve => setTimeout(resolve, ms));
 
 function AddDeviceModal({visible, onClose, onAdd}: Props) {
   const [step, setStep] = useState<ProvisionStep>('select');
@@ -63,6 +72,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   >();
   const [name, setName] = useState('');
   const [room, setRoom] = useState('');
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   const selectedProduct = getProductDefinition(selectedType);
 
@@ -86,6 +96,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     setProvisionedDeviceId(undefined);
     setName(defaultProduct.defaultName);
     setRoom(defaultProduct.defaultRoom);
+    setIsDemoMode(false);
   }, [visible]);
 
   useEffect(() => {
@@ -94,11 +105,22 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   }, [selectedProduct]);
 
   useEffect(() => {
+    if (visible && step === 'wifi' && isDemoMode) {
+      const defaultNetwork = demoWifiNetworks[0];
+      setNetworks(demoWifiNetworks);
+      setSelectedNetwork(defaultNetwork);
+      setPassword('demo1234');
+      setConnectionMessage(
+        `${defaultNetwork.ssid} 선택됨. 연결 버튼을 누르면 더미 기기가 연결 완료 상태가 됩니다.`,
+      );
+      return;
+    }
+
     if (visible && step === 'wifi' && networks.length === 0 && !isScanning) {
       refreshWifiList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, step]);
+  }, [visible, step, isDemoMode]);
 
   const titleByStep = {
     select: '장치 추가',
@@ -107,13 +129,43 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     name: '장치 이름 설정',
   };
 
+  const startDemoFlow = () => {
+    const defaultProduct = getProductDefinition('sprout-grower');
+
+    setIsDemoMode(true);
+    setStep('connect');
+    setSelectedType('sprout-grower');
+    setNetworks(demoWifiNetworks);
+    setSelectedNetwork(null);
+    setPassword('demo1234');
+    setCurrentSsid(demoDeviceSetupSsid);
+    setScanError('');
+    setConnectionMessage('화면 확인용 데모 연결을 시작합니다.');
+    setProvisionedIp(undefined);
+    setProvisionedDeviceId(undefined);
+    setName(defaultProduct.defaultName);
+    setRoom(defaultProduct.defaultRoom);
+  };
+
   const refreshCurrentSsid = async () => {
+    if (isDemoMode) {
+      setCurrentSsid(demoDeviceSetupSsid);
+      return demoDeviceSetupSsid;
+    }
+
     const ssid = await getCurrentWifiSsid();
     setCurrentSsid(ssid);
     return ssid;
   };
 
   const refreshWifiList = async () => {
+    if (isDemoMode) {
+      setNetworks(demoWifiNetworks);
+      setScanError('');
+      setConnectionMessage('더미 Wi-Fi 목록을 표시 중입니다.');
+      return;
+    }
+
     setIsScanning(true);
     setScanError('');
     setConnectionMessage('');
@@ -140,6 +192,12 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   };
 
   const ensureDeviceWifiConnected = async () => {
+    if (isDemoMode) {
+      setCurrentSsid(demoDeviceSetupSsid);
+      setConnectionMessage(`${demoDeviceSetupSsid}에 연결된 것으로 처리했습니다.`);
+      return true;
+    }
+
     setIsCheckingDeviceWifi(true);
 
     try {
@@ -165,6 +223,21 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     if (!selectedNetwork) {
       Alert.alert('Wi-Fi 선택', '연결할 Wi-Fi를 선택해주세요.');
       return false;
+    }
+
+    if (isDemoMode) {
+      setIsProvisioning(true);
+      setConnectionMessage('더미 기기에 Wi-Fi 정보를 보내는 중입니다...');
+
+      await demoDelay(700);
+
+      setProvisionedIp(demoProvisionedIp);
+      setProvisionedDeviceId(demoHardwareId);
+      setConnectionMessage(
+        `더미 기기가 ${selectedNetwork.ssid}에 연결되었습니다. IP: ${demoProvisionedIp}`,
+      );
+      setIsProvisioning(false);
+      return true;
     }
 
     if (isSecuredNetwork(selectedNetwork) && password.length === 0) {
@@ -208,6 +281,10 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   };
 
   const returnPhoneToHomeWifi = async () => {
+    if (isDemoMode) {
+      return;
+    }
+
     if (!selectedNetwork) {
       return;
     }
@@ -254,15 +331,23 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     }
 
     await returnPhoneToHomeWifi();
-    onAdd(
-      createDevice({
-        type: selectedType,
-        name,
-        room,
-        ipAddress: provisionedIp,
-        hardwareId: provisionedDeviceId,
-      }),
-    );
+    const nextDevice = isDemoMode
+      ? createDemoProvisionedDevice({
+          type: selectedType,
+          name,
+          room,
+          ipAddress: provisionedIp,
+          hardwareId: provisionedDeviceId,
+        })
+      : createDevice({
+          type: selectedType,
+          name,
+          room,
+          ipAddress: provisionedIp,
+          hardwareId: provisionedDeviceId,
+        });
+
+    onAdd(nextDevice);
     onClose();
   };
 
@@ -322,6 +407,21 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
         <ScrollView contentContainerStyle={styles.body}>
           {step === 'select' && (
             <>
+              {__DEV__ && (
+                <View style={styles.demoPanel}>
+                  <Text style={styles.demoTitle}>화면 확인용 데모</Text>
+                  <Text style={styles.demoText}>
+                    에뮬레이터에서는 실제 기기 Wi-Fi 연결이 어려워 더미 데이터로
+                    연결 과정을 끝까지 확인할 수 있습니다.
+                  </Text>
+                  <Pressable style={styles.demoButton} onPress={startDemoFlow}>
+                    <Text style={styles.demoButtonText}>
+                      데모 연결 흐름 보기
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+
               <Text style={styles.lead}>
                 등록할 제품을 선택하세요. 제품군이 늘어나도 같은 흐름으로
                 추가할 수 있습니다.
@@ -348,12 +448,17 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
 
           {step === 'connect' && (
             <View style={styles.guidePanel}>
+              {isDemoMode && (
+                <View style={styles.demoBadge}>
+                  <Text style={styles.demoBadgeText}>데모 모드</Text>
+                </View>
+              )}
               <Text style={styles.guideNumber}>1</Text>
               <Text style={styles.guideTitle}>기기 Wi-Fi에 연결</Text>
               <Text style={styles.guideText}>
-                휴대폰 Wi-Fi 설정에서 `{selectedProduct.setupSsidPrefix}`로
-                시작하는 네트워크를 선택하세요. 연결되지 않으면 다음 단계로
-                넘어갈 수 없습니다.
+                {isDemoMode
+                  ? `${demoDeviceSetupSsid}에 연결된 상황으로 가정하고 다음 단계 화면을 확인합니다.`
+                  : `휴대폰 Wi-Fi 설정에서 ${selectedProduct.setupSsidPrefix}로 시작하는 네트워크를 선택하세요. 연결되지 않으면 다음 단계로 넘어갈 수 없습니다.`}
               </Text>
               <Pressable
                 style={styles.checkButton}
@@ -371,6 +476,14 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
 
           {step === 'wifi' && (
             <>
+              {isDemoMode && (
+                <View style={styles.demoInlineNotice}>
+                  <Text style={styles.demoInlineText}>
+                    더미 Wi-Fi 목록입니다. 연결 버튼을 누르면 성공 화면으로
+                    넘어갑니다.
+                  </Text>
+                </View>
+              )}
               <View style={styles.wifiListHeader}>
                 <Text style={styles.wifiTitle}>Wi-Fi</Text>
                 <Pressable onPress={refreshWifiList} disabled={isScanning}>
@@ -430,6 +543,13 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
 
           {step === 'name' && (
             <>
+              {isDemoMode && (
+                <View style={styles.demoInlineNotice}>
+                  <Text style={styles.demoInlineText}>
+                    등록을 완료하면 온라인 상태의 더미 기기가 홈에 추가됩니다.
+                  </Text>
+                </View>
+              )}
               <Text style={styles.lead}>
                 홈에 표시할 이름과 위치를 정해주세요.
               </Text>
@@ -646,6 +766,66 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 22,
     marginBottom: 18,
+  },
+  demoPanel: {
+    backgroundColor: '#ecfeff',
+    borderColor: '#67e8f9',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 18,
+    padding: 16,
+  },
+  demoTitle: {
+    color: '#155e75',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  demoText: {
+    color: '#0f766e',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+    marginTop: 6,
+  },
+  demoButton: {
+    alignItems: 'center',
+    backgroundColor: '#0891b2',
+    borderRadius: 8,
+    justifyContent: 'center',
+    marginTop: 12,
+    minHeight: 44,
+  },
+  demoButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  demoBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#cffafe',
+    borderRadius: 6,
+    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  demoBadgeText: {
+    color: '#155e75',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  demoInlineNotice: {
+    backgroundColor: '#ecfeff',
+    borderColor: '#a5f3fc',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 12,
+  },
+  demoInlineText: {
+    color: '#155e75',
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
   },
   productRow: {
     alignItems: 'center',

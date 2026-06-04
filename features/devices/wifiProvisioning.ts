@@ -23,7 +23,8 @@ export type WifiPermissionResult = {
 };
 
 const DEFAULT_DEVICE_WIFI_PREFIXES = ['Water', 'WaterPlant', 'ESP32C3_SETUP'];
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) =>
+  new Promise<void>(resolve => setTimeout(resolve, ms));
 
 async function requestAndroidPermission(
   permission: Parameters<typeof PermissionsAndroid.request>[0],

@@ -60,6 +60,12 @@ function DeviceCard({device, onPress, onPower}: Props) {
         {device.room} · {device.status === 'online' ? '온라인' : '오프라인'}
       </Text>
 
+      {device.isDemo && (
+        <View style={styles.demoBadge}>
+          <Text style={styles.demoBadgeText}>화면 확인용</Text>
+        </View>
+      )}
+
       {device.runtime?.autoRunning && (
         <View style={styles.autoBadge}>
           <Text style={styles.autoBadgeText}>
@@ -160,6 +166,19 @@ const styles = StyleSheet.create({
   },
   autoBadgeText: {
     color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  demoBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#cffafe',
+    borderRadius: 6,
+    marginTop: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  demoBadgeText: {
+    color: '#155e75',
     fontSize: 11,
     fontWeight: '900',
   },

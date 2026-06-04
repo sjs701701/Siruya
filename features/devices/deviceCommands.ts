@@ -91,6 +91,10 @@ export async function sendDeviceCommand(params: {
   command: DeviceCommand;
   value: boolean;
 }) {
+  if (params.device.isDemo) {
+    return {ok: true, message: 'DEMO_COMMAND_OK'};
+  }
+
   if (params.device.hardwareId) {
     await sendWebSocketDeviceCommand(params);
     return {ok: true};
@@ -127,6 +131,24 @@ export async function sendDeviceCommand(params: {
 export async function fetchDeviceStatus(
   device: Device,
 ): Promise<DeviceStatusSnapshot> {
+  if (device.isDemo) {
+    return {
+      online: device.status === 'online',
+      running: device.controls.running,
+      water: device.controls.water,
+      fan: device.controls.fan,
+      autoState: device.runtime?.autoState ?? 'idle',
+      autoRunning: Boolean(device.runtime?.autoRunning),
+      autoNextRunInMs: device.runtime?.autoNextRunInMs ?? 0,
+      interlockOk: device.runtime?.interlockOk ?? true,
+      fanRunLeftMs: device.runtime?.fanRunLeftMs ?? 0,
+      firmwareVersion: device.runtime?.firmwareVersion,
+      latestFirmwareVersion: device.runtime?.latestFirmwareVersion,
+      firmwareUpdateStatus: device.runtime?.firmwareUpdateStatus,
+      firmwareUpdateProgress: device.runtime?.firmwareUpdateProgress,
+    };
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
 
@@ -172,6 +194,10 @@ export async function fetchDeviceStatus(
 }
 
 export async function sendFirmwareUpdateCommand(device: Device) {
+  if (device.isDemo) {
+    return {ok: true, message: 'DEMO_FIRMWARE_UPDATE_OK'};
+  }
+
   if (device.hardwareId) {
     await sendWebSocketDeviceCommand({
       device,

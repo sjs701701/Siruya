@@ -196,6 +196,10 @@ export function useDevices() {
 
       setDevices(currentDevices => {
         const nextDevices = currentDevices.map(device => {
+          if (device.isDemo) {
+            return device;
+          }
+
           const product = getProductDefinition(device.type);
 
           if (!product.firmwareManifestUrl) {
@@ -279,6 +283,10 @@ export function useDevices() {
       const currentDevices = devicesRef.current;
       const nextDevices = await Promise.all(
         currentDevices.map(async device => {
+          if (device.isDemo) {
+            return device;
+          }
+
           if (device.hardwareId || !device.ipAddress) {
             return device;
           }
@@ -448,6 +456,7 @@ export function useDevices() {
         const nextDevices = currentDevices.map(device => {
           const lastSeenAt = device.runtime?.lastSeenAt;
           const isStale =
+            !device.isDemo &&
             Boolean(device.hardwareId) &&
             device.status === 'online' &&
             (!lastSeenAt || now - lastSeenAt > DEVICE_STATE_STALE_MS);
