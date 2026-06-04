@@ -1,5 +1,5 @@
 {
-  "name": "pocket",
+  "name": "siruya",
   "version": "0.0.1",
   "private": true,
   "scripts": {
@@ -12,24 +12,9 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
-    "@react-native-community/datetimepicker": "latest",
-    "@react-native/new-app-screen": "0.85.3",
-    "@react-navigation/bottom-tabs": "latest",
-    "@react-navigation/native": "latest",
-    "@react-navigation/native-stack": "latest",
-    "@react-navigation/stack": "latest",
-    "@tanstack/react-query": "latest",
-    "axios": "latest",
-    "date-fns": "latest",
     "react": "19.2.3",
     "react-native": "0.85.3",
-    "react-native-dialog": "latest",
-    "react-native-gesture-handler": "latest",
-    "react-native-modal-datetime-picker": "latest",
-    "react-native-rename": "latest",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-screens": "latest",
-    "react-native-version-check": "latest",
     "react-native-wifi-reborn": "^4.13.6"
   },
   "devDependencies": {

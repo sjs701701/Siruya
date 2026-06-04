@@ -82,7 +82,7 @@ function MainTab() {
       <StatusBar barStyle="dark-content" backgroundColor="#eef7ff" />
       <View style={styles.header}>
         <View>
-          <Text style={styles.homeLabel}>My home</Text>
+          <Text style={styles.homeLabel}>시루야</Text>
           <Text style={styles.headerSub}>
             연결됨 {onlineCount}대 · 전체 {devices.length}대
           </Text>
@@ -107,18 +107,6 @@ function MainTab() {
         style={styles.content}
         contentContainerStyle={styles.contentInner}
         showsVerticalScrollIndicator={false}>
-        <View style={styles.sceneRow}>
-          <SceneChip icon="⌂" label="Arrive Home" />
-          <SceneChip icon="☾" label="Good Night" />
-        </View>
-
-        <View style={styles.tabs}>
-          <Text style={[styles.tabText, styles.tabActive]}>All</Text>
-          <Text style={styles.tabText}>Favorite</Text>
-          <Text style={styles.tabText}>Group</Text>
-          <Text style={styles.tabText}>Living Room</Text>
-        </View>
-
         {Object.entries(groupedDevices).map(([section, sectionDevices]) => (
           <View key={section}>
             <Text style={styles.sectionLabel}>{section}</Text>
@@ -135,12 +123,12 @@ function MainTab() {
           </View>
         ))}
 
-        <Text style={styles.sectionLabel}>Device care</Text>
+        <Text style={styles.sectionLabel}>기기 관리</Text>
         <View style={styles.carePanel}>
-          <Text style={styles.careTitle}>기기별 청소 모드</Text>
+          <Text style={styles.careTitle}>청소 모드 안내</Text>
           <Text style={styles.careText}>
-            콩나물을 다 키운 뒤 각 장치를 열고 청소 모드를 실행하면 펌프로
-            물을 순환시켜 기기를 세척합니다.
+            콩나물을 다 키운 뒤 기기를 열고 청소 모드를 실행하면 펌프로
+            물을 순환시켜 내부를 세척합니다.
           </Text>
         </View>
       </ScrollView>
@@ -157,15 +145,6 @@ function MainTab() {
         onRemove={removeDevice}
       />
     </SafeAreaView>
-  );
-}
-
-function SceneChip({icon, label}: {icon: string; label: string}) {
-  return (
-    <Pressable style={styles.sceneChip}>
-      <Text style={styles.sceneIcon}>{icon}</Text>
-      <Text style={styles.sceneText}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -223,44 +202,6 @@ const styles = StyleSheet.create({
   contentInner: {
     paddingBottom: 30,
     paddingHorizontal: 18,
-  },
-  sceneRow: {
-    flexDirection: 'row',
-    gap: 14,
-    paddingTop: 18,
-  },
-  sceneChip: {
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 28,
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-  },
-  sceneIcon: {
-    color: '#4777c7',
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  sceneText: {
-    color: '#1f2937',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  tabs: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 20,
-    marginTop: 34,
-  },
-  tabText: {
-    color: '#94a3b8',
-    fontSize: 21,
-    fontWeight: '800',
-  },
-  tabActive: {
-    color: '#111827',
   },
   sectionLabel: {
     color: '#94a3b8',

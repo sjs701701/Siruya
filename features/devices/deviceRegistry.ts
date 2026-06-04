@@ -12,7 +12,7 @@ export const productDefinitions: ProductDefinition[] = [
     provisioningUrl: 'http://192.168.4.1/provision',
     firmwareManifestUrl:
       'https://mqtt.app2-server.kr/firmware/sprout-grower/latest.json',
-    sectionLabel: 'Bean sprout devices',
+    sectionLabel: '콩나물재배기',
   },
   {
     type: 'future-device',
@@ -23,7 +23,7 @@ export const productDefinitions: ProductDefinition[] = [
     defaultRoom: '거실',
     setupSsidPrefix: 'DEVICE-SETUP',
     provisioningUrl: 'http://192.168.4.1/provision',
-    sectionLabel: 'Other devices',
+    sectionLabel: '기타 기기',
   },
 ];
 

@@ -1,79 +1,28 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Siruya
 
-# Getting Started
+Siruya는 콩나물재배기 같은 소형 식물 재배 기기를 스마트폰에서 등록하고 제어하기 위한 IoT 앱입니다.
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+## 주요 기능
 
-## Step 1: Start the Metro Server
+- 기기 등록: 기기가 만든 `WaterPlant-*` Wi-Fi에 연결한 뒤 집 Wi-Fi 정보를 전달합니다.
+- 기기 목록: 등록된 재배기의 연결 상태와 물/팬 동작 상태를 확인합니다.
+- 기기 제어: 전원, 물 공급, 팬, 청소 모드를 앱에서 제어합니다.
+- 상태 확인: 기기 상태를 주기적으로 읽고 온라인/오프라인 상태를 표시합니다.
+- 펌웨어 업데이트: 기기 프로그램의 최신 버전을 확인하고 업데이트 명령을 보냅니다.
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+## 프로젝트 구성
 
-To start Metro, run the following command from the _root_ of your React Native project:
+- `screens/`: 앱 화면
+- `features/devices/`: 기기 등록, 상태 확인, 제어 기능
+- `firmware/`: 콩나물재배기 내부에 들어가는 기기 프로그램
+- `android/`, `ios/`: Android와 iOS 앱 실행 설정
+
+## 실행
 
 ```bash
-# using npm
+npm install
 npm start
-
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Start your Application
-
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
-
-### For Android
-
-```bash
-# using npm
 npm run android
-
-# OR using Yarn
-yarn android
 ```
 
-### For iOS
-
-```bash
-# using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
-
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
-
-## Step 3: Modifying your App
-
-Now that you have successfully run the app, let's modify it.
-
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
-
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+현재 코드는 앱 첫 화면에서 바로 기기 관리 화면을 보여줍니다.
