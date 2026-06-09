@@ -1,5 +1,6 @@
 import React from 'react';
 import {StyleSheet, Switch, Text, TextInput, View} from 'react-native';
+import {triggerToggleHaptic} from './HapticPressable';
 
 type ControlRowProps = {
   title: string;
@@ -16,13 +17,22 @@ export function ControlRow({
   onValueChange,
   disabled = false,
 }: ControlRowProps) {
+  const handleValueChange = (nextValue: boolean) => {
+    triggerToggleHaptic(nextValue);
+    onValueChange();
+  };
+
   return (
     <View style={[styles.controlRow, disabled && styles.controlRowDisabled]}>
       <View style={styles.controlCopy}>
         <Text style={styles.controlTitle}>{title}</Text>
         <Text style={styles.controlDescription}>{description}</Text>
       </View>
-      <Switch value={value} onValueChange={onValueChange} disabled={disabled} />
+      <Switch
+        value={value}
+        onValueChange={handleValueChange}
+        disabled={disabled}
+      />
     </View>
   );
 }

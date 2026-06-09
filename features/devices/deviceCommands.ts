@@ -5,6 +5,10 @@ import {
   FirmwareUpdateStatus,
 } from './types';
 import {sendWebSocketDeviceCommand} from './deviceWebSocket';
+import {
+  autoStateFromDeviceCode,
+  normalizeFirmwareStatus,
+} from './deviceRuntime';
 
 export type DeviceCommandResponse = {
   ok?: boolean;
@@ -56,34 +60,6 @@ function getDeviceBaseUrl(device: Device) {
   }
 
   return `http://${device.ipAddress}`;
-}
-
-function normalizeFirmwareStatus(
-  status?: string,
-  updateAvailable?: boolean,
-): FirmwareUpdateStatus {
-  if (
-    status === 'updating' ||
-    status === 'updated' ||
-    status === 'failed' ||
-    status === 'available'
-  ) {
-    return status;
-  }
-
-  return updateAvailable ? 'available' : 'idle';
-}
-
-function autoStateFromEsp32(autoState?: number): DeviceAutoState {
-  if (autoState === 1) {
-    return 'preparing';
-  }
-
-  if (autoState === 2) {
-    return 'watering';
-  }
-
-  return 'idle';
 }
 
 export async function sendDeviceCommand(params: {
@@ -164,7 +140,7 @@ export async function fetchDeviceStatus(
       throw new Error(`STATUS_FAILED_${response.status}`);
     }
 
-    const autoState = autoStateFromEsp32(data.auto_state);
+    const autoState = autoStateFromDeviceCode(data.auto_state);
     const autoRunning =
       Boolean(data.pump_req_auto) ||
       autoState === 'preparing' ||

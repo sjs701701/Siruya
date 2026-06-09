@@ -36,10 +36,14 @@ export function createDemoProvisionedDevice(params: {
   ipAddress?: string;
   hardwareId?: string;
 }): Device {
+  const createdAt = Date.now();
+
   return {
-    id: `demo-${params.type}-${Date.now()}`,
+    id: `demo-${params.type}-${createdAt}`,
     hardwareId: params.hardwareId ?? demoHardwareId,
     isDemo: true,
+    registeredAt: createdAt,
+    growthStartedAt: createdAt,
     name: params.name.trim() || '콩나물재배기',
     type: params.type,
     room: params.room.trim() || '주방',

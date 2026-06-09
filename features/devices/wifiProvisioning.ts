@@ -123,6 +123,22 @@ export async function disconnectFromDeviceWifi(setupSsidPrefix: string) {
   return true;
 }
 
+export async function connectToDeviceWifi(ssid: string) {
+  if (Platform.OS === 'android') {
+    const permission = await requestWifiScanPermission();
+
+    if (!permission.granted) {
+      throw new Error(
+        permission.blocked
+          ? 'WIFI_PERMISSION_BLOCKED'
+          : 'WIFI_PERMISSION_DENIED',
+      );
+    }
+  }
+
+  await WifiManager.connectToProtectedSSID(ssid, '', false, false);
+}
+
 export async function connectToHomeWifi(params: {
   ssid: string;
   password: string;

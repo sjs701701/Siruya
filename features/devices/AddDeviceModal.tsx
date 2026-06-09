@@ -1,17 +1,21 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Modal,
-  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   StatusBar,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   createDevice,
   getProductDefinition,
@@ -24,9 +28,14 @@ import {
   demoProvisionedIp,
   demoWifiNetworks,
 } from './demoDevices';
+import {lightScreenBackground, lightScreenBackgroundColor} from './deviceTheme';
+import DeviceActionButton from './DeviceActionButton';
 import {LabeledInput} from './DeviceFormFields';
+import HapticPressable from './HapticPressable';
+import {getProductImageSource} from './productAssets';
 import {Device, DeviceType, ProvisionStep} from './types';
 import {
+  connectToDeviceWifi,
   connectToHomeWifi,
   disconnectFromDeviceWifi,
   getCurrentWifiSsid,
@@ -48,11 +57,27 @@ type Props = {
 const steps: ProvisionStep[] = ['select', 'connect', 'wifi', 'name'];
 const demoDelay = (ms: number) =>
   new Promise<void>(resolve => setTimeout(resolve, ms));
+const productCardSlotWidth = 250;
+const productCardGap = 18;
+const productCardSnapInterval = productCardSlotWidth + productCardGap;
+const modalBodyHorizontalPadding = 22;
+const demoDeviceNetwork: WifiNetwork = {
+  ssid: demoDeviceSetupSsid,
+  level: -36,
+  frequency: 2412,
+  capabilities: '',
+};
 
 function AddDeviceModal({visible, onClose, onAdd}: Props) {
+  const productScrollRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
+  const {height: screenHeight, width: screenWidth} = useWindowDimensions();
   const [step, setStep] = useState<ProvisionStep>('select');
   const [selectedType, setSelectedType] = useState<DeviceType>('sprout-grower');
   const [networks, setNetworks] = useState<WifiNetwork[]>([]);
+  const [deviceNetworks, setDeviceNetworks] = useState<WifiNetwork[]>([]);
+  const [selectedDeviceNetwork, setSelectedDeviceNetwork] =
+    useState<WifiNetwork | null>(null);
   const [selectedNetwork, setSelectedNetwork] = useState<WifiNetwork | null>(
     null,
   );
@@ -61,9 +86,12 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   );
   const [password, setPassword] = useState('');
   const [currentSsid, setCurrentSsid] = useState('');
+  const [isDeviceWifiConnected, setIsDeviceWifiConnected] = useState(false);
   const [isCheckingDeviceWifi, setIsCheckingDeviceWifi] = useState(false);
+  const [isScanningDeviceWifi, setIsScanningDeviceWifi] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
+  const [deviceScanError, setDeviceScanError] = useState('');
   const [scanError, setScanError] = useState('');
   const [connectionMessage, setConnectionMessage] = useState('');
   const [provisionedIp, setProvisionedIp] = useState<string | undefined>();
@@ -75,6 +103,15 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   const [isDemoMode, setIsDemoMode] = useState(false);
 
   const selectedProduct = getProductDefinition(selectedType);
+  const productCarouselWidth = Math.max(
+    screenWidth - modalBodyHorizontalPadding * 2,
+    productCardSlotWidth,
+  );
+  const productCarouselSidePadding = Math.max(
+    (productCarouselWidth - productCardSlotWidth) / 2,
+    0,
+  );
+  const wifiListHeight = Math.max(260, screenHeight - 320);
 
   useEffect(() => {
     if (!visible) {
@@ -85,11 +122,15 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     setStep('select');
     setSelectedType('sprout-grower');
     setNetworks([]);
+    setDeviceNetworks([]);
+    setSelectedDeviceNetwork(null);
     setSelectedNetwork(null);
     setPasswordNetwork(null);
     setPassword('');
     setCurrentSsid('');
+    setIsDeviceWifiConnected(false);
     setIsProvisioning(false);
+    setDeviceScanError('');
     setScanError('');
     setConnectionMessage('');
     setProvisionedIp(undefined);
@@ -103,6 +144,30 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     setName(selectedProduct.defaultName);
     setRoom(selectedProduct.defaultRoom);
   }, [selectedProduct]);
+
+  useEffect(() => {
+    if (visible && step === 'connect' && isDemoMode) {
+      setDeviceNetworks([demoDeviceNetwork]);
+      setSelectedDeviceNetwork(demoDeviceNetwork);
+      setIsDeviceWifiConnected(true);
+      return;
+    }
+
+    if (!(visible && step === 'connect')) {
+      return;
+    }
+
+    if (deviceNetworks.length === 0 && !isScanningDeviceWifi) {
+      refreshDeviceWifiList();
+    }
+
+    refreshCurrentSsid();
+
+    const currentSsidTimer = setInterval(refreshCurrentSsid, 2500);
+
+    return () => clearInterval(currentSsidTimer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, step, isDemoMode, selectedType]);
 
   useEffect(() => {
     if (visible && step === 'wifi' && isDemoMode) {
@@ -136,9 +201,13 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     setStep('connect');
     setSelectedType('sprout-grower');
     setNetworks(demoWifiNetworks);
+    setDeviceNetworks([demoDeviceNetwork]);
+    setSelectedDeviceNetwork(demoDeviceNetwork);
     setSelectedNetwork(null);
     setPassword('demo1234');
     setCurrentSsid(demoDeviceSetupSsid);
+    setIsDeviceWifiConnected(true);
+    setDeviceScanError('');
     setScanError('');
     setConnectionMessage('화면 확인용 데모 연결을 시작합니다.');
     setProvisionedIp(undefined);
@@ -150,11 +219,15 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   const refreshCurrentSsid = async () => {
     if (isDemoMode) {
       setCurrentSsid(demoDeviceSetupSsid);
+      setIsDeviceWifiConnected(true);
       return demoDeviceSetupSsid;
     }
 
     const ssid = await getCurrentWifiSsid();
     setCurrentSsid(ssid);
+    setIsDeviceWifiConnected(
+      isDeviceSetupSsid(ssid, selectedProduct.setupSsidPrefix),
+    );
     return ssid;
   };
 
@@ -194,6 +267,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   const ensureDeviceWifiConnected = async () => {
     if (isDemoMode) {
       setCurrentSsid(demoDeviceSetupSsid);
+      setIsDeviceWifiConnected(true);
       setConnectionMessage(`${demoDeviceSetupSsid}에 연결된 것으로 처리했습니다.`);
       return true;
     }
@@ -310,11 +384,8 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   };
 
   const goNext = async () => {
-    if (step === 'connect') {
-      const connected = await ensureDeviceWifiConnected();
-      if (!connected) {
-        return;
-      }
+    if (step === 'connect' && !isDeviceWifiConnected) {
+      return;
     }
 
     if (step === 'wifi') {
@@ -351,6 +422,87 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     onClose();
   };
 
+  const refreshDeviceWifiList = async () => {
+    if (isDemoMode) {
+      setDeviceNetworks([demoDeviceNetwork]);
+      setSelectedDeviceNetwork(demoDeviceNetwork);
+      setDeviceScanError('');
+      return;
+    }
+
+    setIsScanningDeviceWifi(true);
+    setDeviceScanError('');
+    setConnectionMessage('');
+
+    try {
+      const nextNetworks = await scanWifiNetworks();
+      setDeviceNetworks(
+        nextNetworks.filter(network =>
+          isDeviceSetupSsid(network.ssid, selectedProduct.setupSsidPrefix),
+        ),
+      );
+    } catch (error) {
+      setDeviceScanError(
+        error instanceof Error && error.message === 'WIFI_PERMISSION_BLOCKED'
+          ? 'Wi-Fi 검색 권한이 차단되었습니다. 앱 설정에서 위치 권한을 허용해주세요.'
+          : error instanceof Error && error.message === 'WIFI_PERMISSION_DENIED'
+            ? 'Wi-Fi 검색 권한이 거부되었습니다.'
+            : '기기 Wi-Fi를 검색하지 못했습니다. 휴대폰의 Wi-Fi와 위치 기능이 켜져 있는지 확인해주세요.',
+      );
+    } finally {
+      setIsScanningDeviceWifi(false);
+    }
+  };
+
+  const connectDeviceNetwork = async (network: WifiNetwork) => {
+    setSelectedDeviceNetwork(network);
+    setDeviceScanError('');
+    setIsDeviceWifiConnected(false);
+
+    if (isDemoMode) {
+      setCurrentSsid(network.ssid);
+      setIsDeviceWifiConnected(true);
+      setConnectionMessage(
+        `${network.ssid}에 연결된 것으로 처리했습니다. 다음을 눌러 진행해주세요.`,
+      );
+      return;
+    }
+
+    setIsCheckingDeviceWifi(true);
+    setConnectionMessage(`${network.ssid} 연결 중입니다...`);
+
+    try {
+      await connectToDeviceWifi(network.ssid);
+      const connected = await isConnectedToDeviceWifi(
+        selectedProduct.setupSsidPrefix,
+      );
+      await refreshCurrentSsid();
+      setIsDeviceWifiConnected(connected);
+
+      if (!connected) {
+        setConnectionMessage('');
+        Alert.alert(
+          '기기 Wi-Fi 연결 확인 필요',
+          `${network.ssid}에 연결되지 않았습니다. 다시 시도하거나 휴대폰 Wi-Fi 설정에서 직접 연결해주세요.`,
+        );
+        return;
+      }
+
+      setConnectionMessage(
+        `${network.ssid}에 연결되었습니다. 다음을 눌러 집 Wi-Fi를 선택해주세요.`,
+      );
+    } catch {
+      setIsDeviceWifiConnected(false);
+      setConnectionMessage('');
+      Alert.alert(
+        '기기 Wi-Fi 연결 실패',
+        '앱에서 자동 연결하지 못했습니다. 다시 시도하거나 휴대폰 Wi-Fi 설정에서 직접 연결해주세요.',
+      );
+    } finally {
+      setIsCheckingDeviceWifi(false);
+    }
+  };
+
   const selectNetwork = (network: WifiNetwork) => {
     setSelectedNetwork(network);
     setPassword('');
@@ -383,14 +535,52 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     );
   };
 
+  const selectProduct = (type: DeviceType, index: number) => {
+    setSelectedType(type);
+    setDeviceNetworks([]);
+    setSelectedDeviceNetwork(null);
+    setIsDeviceWifiConnected(false);
+    setDeviceScanError('');
+    productScrollRef.current?.scrollTo({
+      x: index * productCardSnapInterval,
+      animated: true,
+    });
+  };
+
+  const updateSelectedProductFromScroll = (
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) => {
+    const nextIndex = Math.max(
+      0,
+      Math.min(
+        productDefinitions.length - 1,
+        Math.round(event.nativeEvent.contentOffset.x / productCardSnapInterval),
+      ),
+    );
+    setSelectedType(productDefinitions[nextIndex].type);
+  };
+
+  const isPrimaryButtonDisabled =
+    isProvisioning ||
+    isCheckingDeviceWifi ||
+    (step === 'connect' && !isDeviceWifiConnected);
+
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      navigationBarTranslucent>
       <SafeAreaView style={styles.screen}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={lightScreenBackgroundColor}
+        />
         <View style={styles.header}>
-          <Pressable onPress={onClose} style={styles.closeButton}>
+          <HapticPressable onPress={onClose} style={styles.closeButton}>
             <Text style={styles.closeText}>x</Text>
-          </Pressable>
+          </HapticPressable>
           <Text style={styles.title}>{titleByStep[step]}</Text>
           <View style={styles.closeButton} />
         </View>
@@ -404,45 +594,163 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
           ))}
         </View>
 
-        <ScrollView contentContainerStyle={styles.body}>
+        {step === 'wifi' ? (
+          <View style={[styles.contentScroller, styles.body, styles.wifiBody]}>
+            {isDemoMode && (
+              <View style={styles.demoInlineNotice}>
+                <Text style={styles.demoInlineText}>
+                  더미 Wi-Fi 목록입니다. 연결 버튼을 누르면 성공 화면으로
+                  넘어갑니다.
+                </Text>
+              </View>
+            )}
+            <View style={styles.wifiListHeader}>
+              <View style={styles.wifiHeaderCopy}>
+                <Text style={styles.wifiTitle}>Wi-Fi</Text>
+                <Text style={styles.wifiHeaderNotice}>
+                  ESP32 연결을 위해 2.4GHz Wi-Fi만 표시합니다.
+                </Text>
+              </View>
+              <HapticPressable onPress={refreshWifiList} disabled={isScanning}>
+                <Text style={styles.refreshText}>
+                  {isScanning ? '검색 중' : '새로고침'}
+                </Text>
+              </HapticPressable>
+            </View>
+
+            {isScanning && (
+              <View style={styles.loadingPanel}>
+                <ActivityIndicator size="small" color="#111111" />
+                <Text style={styles.loadingText}>주변 Wi-Fi 검색 중</Text>
+              </View>
+            )}
+
+            {scanError.length > 0 && (
+              <View style={styles.errorPanel}>
+                <Text style={styles.errorText}>{scanError}</Text>
+              </View>
+            )}
+
+            {connectionMessage.length > 0 && (
+              <View
+                style={[
+                  styles.successPanel,
+                  !isProvisioning && styles.selectedWifiPanel,
+                ]}>
+                <Text
+                  style={[
+                    styles.successText,
+                    !isProvisioning && styles.selectedWifiText,
+                  ]}>
+                  {connectionMessage}
+                </Text>
+              </View>
+            )}
+
+            <View style={[styles.wifiList, styles.wifiListFill]}>
+              <ScrollView
+                bounces={false}
+                nestedScrollEnabled={false}
+                overScrollMode="never"
+                showsVerticalScrollIndicator={networks.length > 4}>
+                {networks.map(network => (
+                  <WifiNetworkRow
+                    key={`${network.ssid}-${network.bssid ?? network.level}`}
+                    network={network}
+                    selected={selectedNetwork?.ssid === network.ssid}
+                    onPress={() => selectNetwork(network)}
+                  />
+                ))}
+                <HapticPressable style={styles.otherNetworkRow}>
+                  <Text style={styles.otherNetworkText}>기타...</Text>
+                </HapticPressable>
+              </ScrollView>
+            </View>
+          </View>
+        ) : (
+        <ScrollView
+          contentContainerStyle={styles.body}
+          style={styles.contentScroller}>
           {step === 'select' && (
             <>
-              {__DEV__ && (
+              {/* 화면 확인용 데모 패널은 더 이상 노출하지 않습니다. */}
+              {false && __DEV__ && (
                 <View style={styles.demoPanel}>
                   <Text style={styles.demoTitle}>화면 확인용 데모</Text>
                   <Text style={styles.demoText}>
                     에뮬레이터에서는 실제 기기 Wi-Fi 연결이 어려워 더미 데이터로
                     연결 과정을 끝까지 확인할 수 있습니다.
                   </Text>
-                  <Pressable style={styles.demoButton} onPress={startDemoFlow}>
+                  <HapticPressable
+                    style={styles.demoButton}
+                    onPress={startDemoFlow}>
                     <Text style={styles.demoButtonText}>
                       데모 연결 흐름 보기
                     </Text>
-                  </Pressable>
+                  </HapticPressable>
                 </View>
               )}
 
-              <Text style={styles.lead}>
-                등록할 제품을 선택하세요. 제품군이 늘어나도 같은 흐름으로
-                추가할 수 있습니다.
-              </Text>
-              {productDefinitions.map(product => (
-                <Pressable
-                  key={product.type}
-                  style={[
-                    styles.productRow,
-                    selectedType === product.type && styles.productRowActive,
+              <View style={styles.productPickerStage}>
+                <ScrollView
+                  ref={productScrollRef}
+                  horizontal
+                  contentContainerStyle={[
+                    styles.productScroller,
+                    {paddingHorizontal: productCarouselSidePadding},
                   ]}
-                  onPress={() => setSelectedType(product.type)}>
-                  <View style={styles.productBadge}>
-                    <Text style={styles.productBadgeText}>{product.badge}</Text>
-                  </View>
-                  <View style={styles.productCopy}>
-                    <Text style={styles.productTitle}>{product.title}</Text>
-                    <Text style={styles.productCaption}>{product.caption}</Text>
-                  </View>
-                </Pressable>
-              ))}
+                  decelerationRate="fast"
+                  onMomentumScrollEnd={updateSelectedProductFromScroll}
+                  showsHorizontalScrollIndicator={false}
+                  style={{width: productCarouselWidth}}
+                  snapToInterval={productCardSnapInterval}>
+                  {productDefinitions.map((product, index) => {
+                    const productImage = getProductImageSource(product.type);
+
+                    return (
+                      <HapticPressable
+                        key={product.type}
+                        style={styles.productRow}
+                        onPress={() => selectProduct(product.type, index)}>
+                        <View style={styles.productImageFrame}>
+                          <View style={styles.productBadge}>
+                            {productImage ? (
+                              <Image
+                                source={productImage}
+                                resizeMode="contain"
+                                style={styles.productImage}
+                              />
+                            ) : (
+                              <Text style={styles.productBadgeText}>
+                                {product.badge}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                      </HapticPressable>
+                    );
+                  })}
+                </ScrollView>
+                <View style={styles.productDots}>
+                  {productDefinitions.map(product => (
+                    <View
+                      key={product.type}
+                      style={[
+                        styles.productDot,
+                        selectedType === product.type && styles.productDotOn,
+                      ]}
+                    />
+                  ))}
+                </View>
+                <View style={styles.productCopy}>
+                  <Text style={styles.productTitle}>
+                    {selectedProduct.title}
+                  </Text>
+                  <Text style={styles.productCaption}>
+                    {selectedProduct.caption}
+                  </Text>
+                </View>
+              </View>
             </>
           )}
 
@@ -460,21 +768,59 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
                   ? `${demoDeviceSetupSsid}에 연결된 상황으로 가정하고 다음 단계 화면을 확인합니다.`
                   : `휴대폰 Wi-Fi 설정에서 ${selectedProduct.setupSsidPrefix}로 시작하는 네트워크를 선택하세요. 연결되지 않으면 다음 단계로 넘어갈 수 없습니다.`}
               </Text>
-              <Pressable
-                style={styles.checkButton}
-                onPress={ensureDeviceWifiConnected}
-                disabled={isCheckingDeviceWifi}>
-                <Text style={styles.checkButtonText}>
-                  {isCheckingDeviceWifi ? '확인 중' : '연결 확인'}
-                </Text>
-              </Pressable>
               {currentSsid.length > 0 && (
                 <Text style={styles.currentSsid}>현재 연결: {currentSsid}</Text>
               )}
+              <View style={styles.deviceWifiSection}>
+                <View style={styles.wifiListHeader}>
+                  <Text style={styles.wifiTitle}>기기 Wi-Fi</Text>
+                  <HapticPressable
+                    onPress={refreshDeviceWifiList}
+                    disabled={isScanningDeviceWifi || isCheckingDeviceWifi}>
+                    <Text style={styles.refreshText}>
+                      {isScanningDeviceWifi ? '검색 중' : '새로고침'}
+                    </Text>
+                  </HapticPressable>
+                </View>
+                {isScanningDeviceWifi && (
+                  <View style={styles.loadingPanel}>
+                    <ActivityIndicator size="small" color="#111111" />
+                    <Text style={styles.loadingText}>기기 Wi-Fi 검색 중</Text>
+                  </View>
+                )}
+
+                {deviceScanError.length > 0 && (
+                  <View style={styles.errorPanel}>
+                    <Text style={styles.errorText}>{deviceScanError}</Text>
+                  </View>
+                )}
+
+                <View style={styles.wifiList}>
+                  {deviceNetworks.map(network => (
+                    <WifiNetworkRow
+                      key={`${network.ssid}-${network.bssid ?? network.level}`}
+                      network={network}
+                      selected={selectedDeviceNetwork?.ssid === network.ssid}
+                      disabled={isCheckingDeviceWifi}
+                      onPress={() => connectDeviceNetwork(network)}
+                    />
+                  ))}
+                  {deviceNetworks.length === 0 && !isScanningDeviceWifi && (
+                    <Text style={styles.emptyWifiText}>
+                      검색된 기기 Wi-Fi가 없습니다.
+                    </Text>
+                  )}
+                </View>
+                {connectionMessage.length > 0 && (
+                  <Text style={styles.deviceConnectionMessage}>
+                    {connectionMessage}
+                  </Text>
+                )}
+              </View>
             </View>
           )}
 
-          {step === 'wifi' && (
+          {false && (
             <>
               {isDemoMode && (
                 <View style={styles.demoInlineNotice}>
@@ -485,12 +831,17 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
                 </View>
               )}
               <View style={styles.wifiListHeader}>
-                <Text style={styles.wifiTitle}>Wi-Fi</Text>
-                <Pressable onPress={refreshWifiList} disabled={isScanning}>
+                <View style={styles.wifiHeaderCopy}>
+                  <Text style={styles.wifiTitle}>Wi-Fi</Text>
+                  <Text style={styles.wifiHeaderNotice}>
+                    ESP32 연결을 위해 2.4GHz Wi-Fi만 표시합니다.
+                  </Text>
+                </View>
+                <HapticPressable onPress={refreshWifiList} disabled={isScanning}>
                   <Text style={styles.refreshText}>
                     {isScanning ? '검색 중' : '새로고침'}
                   </Text>
-                </Pressable>
+                </HapticPressable>
               </View>
               <Text style={styles.wifiBandNotice}>
                 ESP32 연결을 위해 2.4GHz Wi-Fi만 표시됩니다.
@@ -498,7 +849,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
 
               {isScanning && (
                 <View style={styles.loadingPanel}>
-                  <ActivityIndicator size="small" color="#0a84ff" />
+                  <ActivityIndicator size="small" color="#111111" />
                   <Text style={styles.loadingText}>주변 Wi-Fi 검색 중</Text>
                 </View>
               )}
@@ -525,18 +876,22 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
                 </View>
               )}
 
-              <View style={styles.wifiList}>
-                {networks.map(network => (
-                  <WifiNetworkRow
-                    key={`${network.ssid}-${network.bssid ?? network.level}`}
-                    network={network}
-                    selected={selectedNetwork?.ssid === network.ssid}
-                    onPress={() => selectNetwork(network)}
-                  />
-                ))}
-                <Pressable style={styles.otherNetworkRow}>
-                  <Text style={styles.otherNetworkText}>기타...</Text>
-                </Pressable>
+              <View style={[styles.wifiList, {height: wifiListHeight}]}>
+                <ScrollView
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={networks.length > 4}>
+                  {networks.map(network => (
+                    <WifiNetworkRow
+                      key={`${network.ssid}-${network.bssid ?? network.level}`}
+                      network={network}
+                      selected={selectedNetwork?.ssid === network.ssid}
+                      onPress={() => selectNetwork(network)}
+                    />
+                  ))}
+                  <HapticPressable style={styles.otherNetworkRow}>
+                    <Text style={styles.otherNetworkText}>기타...</Text>
+                  </HapticPressable>
+                </ScrollView>
               </View>
             </>
           )}
@@ -568,17 +923,26 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
             </>
           )}
         </ScrollView>
+        )}
 
-        <View style={styles.footer}>
+        <View
+          style={[
+            styles.footer,
+            {paddingBottom: Math.max(insets.bottom + 18, 18)},
+          ]}>
           {step !== 'select' && (
-            <Pressable style={styles.secondaryButton} onPress={goBack}>
+            <DeviceActionButton
+              style={styles.secondaryButton}
+              useBackdropBlur={false}
+              onPress={goBack}>
               <Text style={styles.secondaryButtonText}>이전</Text>
-            </Pressable>
+            </DeviceActionButton>
           )}
-          <Pressable
-            style={[styles.primaryButton, isProvisioning && styles.buttonBusy]}
+          <DeviceActionButton
+            style={styles.primaryButton}
+            useBackdropBlur={false}
             onPress={goNext}
-            disabled={isProvisioning || isCheckingDeviceWifi}>
+            disabled={isPrimaryButtonDisabled}>
             <Text style={styles.primaryButtonText}>
               {isProvisioning
                 ? '연결 중'
@@ -588,7 +952,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
                     ? '등록 완료'
                     : '다음'}
             </Text>
-          </Pressable>
+          </DeviceActionButton>
         </View>
 
         <WifiPasswordModal
@@ -609,16 +973,19 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
 function WifiNetworkRow({
   network,
   selected,
+  disabled = false,
   onPress,
 }: {
   network: WifiNetwork;
   selected: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   const secured = isSecuredNetwork(network);
 
   return (
-    <Pressable
+    <HapticPressable
+      disabled={disabled}
       style={[styles.networkRow, selected && styles.networkRowSelected]}
       onPress={onPress}>
       <Text style={styles.networkName} numberOfLines={1}>
@@ -632,7 +999,7 @@ function WifiNetworkRow({
       <Text style={styles.networkSub}>
         {getSignalLabel(network.level)} · {network.level} dBm
       </Text>
-    </Pressable>
+    </HapticPressable>
   );
 }
 
@@ -656,14 +1023,16 @@ function WifiPasswordModal({
       transparent
       visible={Boolean(network)}
       animationType="fade"
-      onRequestClose={onClose}>
+      onRequestClose={onClose}
+      statusBarTranslucent
+      navigationBarTranslucent>
       <View style={styles.overlay}>
         <View style={styles.passwordDialog}>
           <View style={styles.passwordHeader}>
             <Text style={styles.passwordTitle}>Wi-Fi 비밀번호</Text>
-            <Pressable onPress={onClose} style={styles.dialogCloseButton}>
+            <HapticPressable onPress={onClose} style={styles.dialogCloseButton}>
               <Text style={styles.dialogCloseText}>x</Text>
-            </Pressable>
+            </HapticPressable>
           </View>
           <Text style={styles.passwordSsid}>{network?.ssid}</Text>
           <View style={styles.passwordInputGroup}>
@@ -678,22 +1047,26 @@ function WifiPasswordModal({
                 secureTextEntry={!passwordVisible}
                 autoCapitalize="none"
               />
-              <Pressable
+              <HapticPressable
                 style={styles.passwordEyeButton}
                 onPress={() => setPasswordVisible(current => !current)}>
                 <Text style={styles.passwordEyeText}>
                   {passwordVisible ? '숨김' : '보기'}
                 </Text>
-              </Pressable>
+              </HapticPressable>
             </View>
           </View>
           <View style={styles.dialogActions}>
-            <Pressable style={styles.dialogSecondaryButton} onPress={onClose}>
+            <HapticPressable
+              style={styles.dialogSecondaryButton}
+              onPress={onClose}>
               <Text style={styles.dialogSecondaryText}>취소</Text>
-            </Pressable>
-            <Pressable style={styles.dialogPrimaryButton} onPress={onConfirm}>
+            </HapticPressable>
+            <HapticPressable
+              style={styles.dialogPrimaryButton}
+              onPress={onConfirm}>
               <Text style={styles.dialogPrimaryText}>연결</Text>
-            </Pressable>
+            </HapticPressable>
           </View>
         </View>
       </View>
@@ -715,7 +1088,7 @@ function signalBars(level: number) {
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#f8fafc',
+    ...lightScreenBackground,
     flex: 1,
   },
   header: {
@@ -757,8 +1130,14 @@ const styles = StyleSheet.create({
   progressOn: {
     backgroundColor: '#1d9bf0',
   },
+  contentScroller: {
+    flex: 1,
+  },
   body: {
     padding: 22,
+  },
+  wifiBody: {
+    flex: 1,
   },
   lead: {
     color: '#475569',
@@ -827,46 +1206,78 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 18,
   },
+  productPickerStage: {
+    alignItems: 'center',
+    paddingTop: 12,
+  },
+  productScroller: {
+    alignItems: 'center',
+    gap: productCardGap,
+  },
   productRow: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderColor: '#e2e8f0',
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: 'row',
-    marginBottom: 12,
-    padding: 16,
-  },
-  productRowActive: {
-    backgroundColor: '#e0f2fe',
-    borderColor: '#38bdf8',
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    height: 340,
+    padding: 0,
+    width: productCardSlotWidth,
   },
   productBadge: {
     alignItems: 'center',
-    backgroundColor: '#bae6fd',
-    borderRadius: 8,
-    height: 46,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    height: 320,
     justifyContent: 'center',
-    marginRight: 14,
-    width: 46,
+    overflow: 'hidden',
+    width: 240,
+  },
+  productImageFrame: {
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    height: 320,
+    justifyContent: 'center',
+    width: 240,
+  },
+  productImage: {
+    height: '100%',
+    width: '100%',
   },
   productBadgeText: {
     color: '#0369a1',
-    fontSize: 16,
+    fontSize: 28,
     fontWeight: '900',
   },
+  productDots: {
+    flexDirection: 'row',
+    gap: 6,
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  productDot: {
+    backgroundColor: '#c9c9c9',
+    borderRadius: 3,
+    height: 6,
+    width: 6,
+  },
+  productDotOn: {
+    backgroundColor: '#ffffff',
+  },
   productCopy: {
-    flex: 1,
+    alignItems: 'center',
+    marginTop: 28,
   },
   productTitle: {
     color: '#111827',
-    fontSize: 17,
+    fontSize: 22,
     fontWeight: '900',
+    textAlign: 'center',
   },
   productCaption: {
     color: '#64748b',
-    fontSize: 13,
-    marginTop: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 8,
+    textAlign: 'center',
   },
   guidePanel: {
     backgroundColor: '#ffffff',
@@ -890,28 +1301,18 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     marginTop: 12,
   },
-  checkButton: {
-    alignItems: 'center',
-    backgroundColor: '#1d9bf0',
-    borderRadius: 8,
-    justifyContent: 'center',
-    marginTop: 18,
-    minHeight: 48,
-  },
-  checkButtonText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '900',
-  },
   currentSsid: {
     color: '#64748b',
     fontSize: 13,
     fontWeight: '700',
     marginTop: 12,
   },
+  deviceWifiSection: {
+    marginTop: 18,
+  },
   wifiListHeader: {
     alignItems: 'center',
-    backgroundColor: '#111827',
+    backgroundColor: '#d9d9d9',
     borderTopLeftRadius: 8,
     borderTopRightRadius: 8,
     flexDirection: 'row',
@@ -919,19 +1320,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  wifiHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
   wifiTitle: {
-    color: '#ffffff',
+    color: '#111111',
     fontSize: 17,
     fontWeight: '900',
   },
+  wifiHeaderNotice: {
+    color: '#5f5f5f',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    marginTop: 4,
+  },
   refreshText: {
-    color: '#0a84ff',
+    color: '#111111',
     fontSize: 13,
     fontWeight: '800',
   },
   wifiBandNotice: {
-    backgroundColor: '#171717',
-    color: '#cbd5e1',
+    backgroundColor: '#f4f4f4',
+    color: '#5f5f5f',
+    display: 'none',
     fontSize: 12,
     fontWeight: '700',
     paddingBottom: 10,
@@ -939,13 +1352,13 @@ const styles = StyleSheet.create({
   },
   loadingPanel: {
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#f4f4f4',
     flexDirection: 'row',
     gap: 10,
     padding: 14,
   },
   loadingText: {
-    color: '#cbd5e1',
+    color: '#5f5f5f',
     fontSize: 13,
     fontWeight: '700',
   },
@@ -974,36 +1387,56 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   selectedWifiPanel: {
-    backgroundColor: '#dbeafe',
-    borderColor: '#0a84ff',
+    backgroundColor: '#f4f4f4',
+    borderColor: '#111111',
     borderWidth: 1,
   },
   selectedWifiText: {
-    color: '#075985',
+    color: '#111111',
+  },
+  deviceConnectionMessage: {
+    color: '#111111',
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
+    marginTop: 10,
   },
   wifiList: {
-    backgroundColor: '#171717',
+    backgroundColor: '#ffffff',
+    borderColor: '#d9d9d9',
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
-    padding: 4,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    paddingBottom: 4,
+    paddingHorizontal: 0,
+    paddingTop: 4,
+  },
+  wifiListFill: {
+    flex: 1,
+  },
+  emptyWifiText: {
+    color: '#6b6b6b',
+    fontSize: 13,
+    fontWeight: '700',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   networkRow: {
-    borderBottomColor: '#2a2a2a',
-    borderBottomWidth: 1,
+    backgroundColor: '#ffffff',
+    borderTopColor: '#e5e5e5',
+    borderTopWidth: 1,
     minHeight: 48,
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 10,
   },
   networkRowSelected: {
-    backgroundColor: '#0f2745',
-    borderColor: '#0a84ff',
-    borderWidth: 2,
-    borderRadius: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    backgroundColor: '#eeeeee',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   networkName: {
-    color: '#f8fafc',
+    color: '#111111',
     fontSize: 15,
     fontWeight: '700',
     paddingRight: 92,
@@ -1014,23 +1447,23 @@ const styles = StyleSheet.create({
     gap: 8,
     position: 'absolute',
     right: 12,
-    top: 8,
+    top: 10,
   },
   lockIcon: {
-    color: '#e5e7eb',
+    color: '#5f5f5f',
     fontSize: 10,
     fontWeight: '900',
   },
   signalIcon: {
-    color: '#e5e7eb',
+    color: '#5f5f5f',
     fontSize: 12,
     fontWeight: '900',
   },
   infoIcon: {
-    borderColor: '#0a84ff',
+    borderColor: '#111111',
     borderRadius: 9,
     borderWidth: 1,
-    color: '#0a84ff',
+    color: '#111111',
     fontSize: 11,
     fontWeight: '900',
     height: 18,
@@ -1039,7 +1472,7 @@ const styles = StyleSheet.create({
     width: 18,
   },
   networkSub: {
-    color: '#9ca3af',
+    color: '#6b6b6b',
     fontSize: 11,
     marginTop: 2,
   },
@@ -1049,43 +1482,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   otherNetworkText: {
-    color: '#f8fafc',
+    color: '#111111',
     fontSize: 14,
   },
   footer: {
-    backgroundColor: '#ffffff',
-    borderTopColor: '#e2e8f0',
-    borderTopWidth: 1,
+    backgroundColor: 'transparent',
     flexDirection: 'row',
-    gap: 10,
-    padding: 16,
+    gap: 20,
+    paddingBottom: 18,
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   primaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#1d9bf0',
-    borderRadius: 8,
     flex: 1,
-    justifyContent: 'center',
-    minHeight: 52,
   },
   buttonBusy: {
     opacity: 0.7,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: '#3f3f3f',
     fontSize: 16,
     fontWeight: '900',
   },
   secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#e2e8f0',
-    borderRadius: 8,
     flex: 1,
-    justifyContent: 'center',
-    minHeight: 52,
   },
   secondaryButtonText: {
-    color: '#334155',
+    color: '#3f3f3f',
     fontSize: 16,
     fontWeight: '900',
   },

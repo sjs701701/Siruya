@@ -37,6 +37,8 @@ export type Device = {
   id: string;
   hardwareId?: string;
   isDemo?: boolean;
+  registeredAt: number;
+  growthStartedAt: number;
   name: string;
   type: DeviceType;
   room: string;

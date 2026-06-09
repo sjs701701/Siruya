@@ -1,6 +1,8 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
+import {getDeviceStatusLabel} from './deviceStatusLabel';
 import {getProductDefinition} from './deviceRegistry';
+import HapticPressable from './HapticPressable';
 import {
   getAutoStateLabel,
   getNextSprayText,
@@ -33,14 +35,14 @@ function DeviceCard({device, onPress, onPower}: Props) {
   }, []);
 
   return (
-    <Pressable
+    <HapticPressable
       style={[styles.card, isActive && styles.cardActive]}
       onPress={onPress}>
       <View style={styles.cardTop}>
         <View style={[styles.icon, isActive && styles.iconActive]}>
           <Text style={styles.iconText}>{product.badge}</Text>
         </View>
-        <Pressable
+        <HapticPressable
           accessibilityLabel={`${device.name} 전원`}
           style={[styles.powerButton, isActive && styles.powerButtonActive]}
           onPress={event => {
@@ -50,14 +52,14 @@ function DeviceCard({device, onPress, onPower}: Props) {
           <Text style={[styles.powerText, isActive && styles.powerTextActive]}>
             {isActive ? 'ON' : 'OFF'}
           </Text>
-        </Pressable>
+        </HapticPressable>
       </View>
 
       <Text style={styles.name} numberOfLines={1}>
         {device.name}
       </Text>
       <Text style={styles.meta} numberOfLines={1}>
-        {device.room} · {device.status === 'online' ? '온라인' : '오프라인'}
+        {device.room} · {getDeviceStatusLabel(device.status)}
       </Text>
 
       {device.isDemo && (
@@ -90,7 +92,7 @@ function DeviceCard({device, onPress, onPower}: Props) {
           </Text>
         </View>
       )}
-    </Pressable>
+    </HapticPressable>
   );
 }
 

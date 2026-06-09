@@ -12,7 +12,13 @@ import {
   fetchFirmwareManifest,
   hasDifferentFirmwareVersion,
 } from './firmwareManifest';
-import {Device, DeviceAutoState, FirmwareUpdateStatus} from './types';
+import {
+  autoStateFromDeviceCode,
+  createEmptyRuntime,
+  normalizeFirmwareStatus,
+} from './deviceRuntime';
+import {normalizeDeviceLifecycleDates} from './growthProgress';
+import {Device} from './types';
 
 const STORAGE_KEY = 'smart_devices_v1';
 const FIRMWARE_MANIFEST_REFRESH_MS = 10 * 60 * 1000;
@@ -81,20 +87,8 @@ function applyStatusSnapshot(
   };
 }
 
-function autoStateFromWs(autoState?: number): DeviceAutoState {
-  if (autoState === 1) {
-    return 'preparing';
-  }
-
-  if (autoState === 2) {
-    return 'watering';
-  }
-
-  return 'idle';
-}
-
 function snapshotFromWsState(state: DeviceWsState): DeviceStatusSnapshot {
-  const autoState = autoStateFromWs(state.auto_state);
+  const autoState = autoStateFromDeviceCode(state.auto_state);
   const autoRunning =
     Boolean(state.pump_req_auto) ||
     autoState === 'preparing' ||
@@ -122,22 +116,6 @@ function snapshotFromWsState(state: DeviceWsState): DeviceStatusSnapshot {
   };
 }
 
-function normalizeFirmwareStatus(
-  status?: string,
-  updateAvailable?: boolean,
-): FirmwareUpdateStatus {
-  if (
-    status === 'updating' ||
-    status === 'updated' ||
-    status === 'failed' ||
-    status === 'available'
-  ) {
-    return status;
-  }
-
-  return updateAvailable ? 'available' : 'idle';
-}
-
 export function useDevices() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
@@ -151,7 +129,13 @@ export function useDevices() {
     AsyncStorage.getItem(STORAGE_KEY)
       .then(value => {
         if (value) {
-          setDevices(JSON.parse(value));
+          const now = Date.now();
+          const storedDevices = JSON.parse(value) as Device[];
+          setDevices(
+            storedDevices.map(device =>
+              normalizeDeviceLifecycleDates(device, now),
+            ),
+          );
         }
       })
       .catch(() => undefined);
@@ -237,13 +221,7 @@ export function useDevices() {
           const nextDevice = {
             ...device,
             runtime: {
-              ...(device.runtime ?? {
-                autoState: 'idle' as const,
-                autoRunning: false,
-                autoNextRunInMs: 0,
-                interlockOk: false,
-                fanRunLeftMs: 0,
-              }),
+              ...(device.runtime ?? createEmptyRuntime()),
               latestFirmwareVersion: manifest.version,
               firmwareUpdateStatus: nextFirmwareStatus,
             },
@@ -299,13 +277,7 @@ export function useDevices() {
               ...device,
               status: 'offline' as const,
               runtime: {
-                ...(device.runtime ?? {
-                  autoState: 'idle' as const,
-                  autoRunning: false,
-                  autoNextRunInMs: 0,
-                  interlockOk: false,
-                  fanRunLeftMs: 0,
-                }),
+                ...(device.runtime ?? createEmptyRuntime()),
               },
             };
           }
@@ -411,13 +383,7 @@ export function useDevices() {
             runtime:
               message.type === 'device_online'
                 ? {
-                    ...(device.runtime ?? {
-                      autoState: 'idle' as const,
-                      autoRunning: false,
-                      autoNextRunInMs: 0,
-                      interlockOk: false,
-                      fanRunLeftMs: 0,
-                    }),
+                    ...(device.runtime ?? createEmptyRuntime()),
                     lastSeenAt: Date.now(),
                   }
                 : device.runtime,
@@ -498,26 +464,30 @@ export function useDevices() {
   );
 
   const addDevice = (device: Device) => {
+    const normalizedDevice = normalizeDeviceLifecycleDates(device);
+
     setDevices(current => {
       const duplicateIndex = current.findIndex(existing =>
-        isSamePhysicalDevice(existing, device),
+        isSamePhysicalDevice(existing, normalizedDevice),
       );
 
       if (duplicateIndex < 0) {
-        setSelectedDevice(device);
-        return [device, ...current];
+        setSelectedDevice(normalizedDevice);
+        return [normalizedDevice, ...current];
       }
 
       const existing = current[duplicateIndex];
       const mergedDevice: Device = {
         ...existing,
-        ...device,
+        ...normalizedDevice,
         id: existing.id,
-        hardwareId: device.hardwareId ?? existing.hardwareId,
-        ipAddress: device.ipAddress ?? existing.ipAddress,
+        registeredAt: existing.registeredAt,
+        growthStartedAt: existing.growthStartedAt,
+        hardwareId: normalizedDevice.hardwareId ?? existing.hardwareId,
+        ipAddress: normalizedDevice.ipAddress ?? existing.ipAddress,
         controls: {
           ...existing.controls,
-          ...device.controls,
+          ...normalizedDevice.controls,
         },
         runtime: existing.runtime,
       };

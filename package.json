@@ -12,9 +12,12 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/blur": "^4.4.1",
     "react": "19.2.3",
     "react-native": "0.85.3",
+    "react-native-haptic-feedback": "^3.0.0",
     "react-native-safe-area-context": "^5.5.2",
+    "react-native-svg": "^15.15.5",
     "react-native-wifi-reborn": "^4.13.6"
   },
   "devDependencies": {

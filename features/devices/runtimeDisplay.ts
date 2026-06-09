@@ -1,4 +1,4 @@
-import {DeviceRuntime} from './types';
+import {DeviceRuntime, FirmwareUpdateStatus} from './types';
 
 export function getRemainingAutoNextRunMs(
   runtime: DeviceRuntime | undefined,
@@ -71,4 +71,27 @@ export function formatDuration(ms: number) {
   }
 
   return `${seconds}초`;
+}
+
+export function getFirmwareStatusLabel(
+  status: FirmwareUpdateStatus | undefined,
+  progress = 0,
+) {
+  if (status === 'available') {
+    return '업데이트 가능';
+  }
+
+  if (status === 'updating') {
+    return progress > 0 ? `업데이트 중 ${progress}%` : '업데이트 준비 중';
+  }
+
+  if (status === 'updated') {
+    return '최신 버전 적용 완료';
+  }
+
+  if (status === 'failed') {
+    return '업데이트 실패';
+  }
+
+  return '최신 상태 확인 대기';
 }

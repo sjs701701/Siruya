@@ -1,27 +1,51 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
-  Pressable,
+  Image,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import AddDeviceModal from '../features/devices/AddDeviceModal';
-import DeviceCard from '../features/devices/DeviceCard';
-import {sendDeviceCommand} from '../features/devices/deviceCommands';
+import AirFlowEffect from '../features/devices/AirFlowEffect';
+import DeviceActionButton from '../features/devices/DeviceActionButton';
 import DeviceDetailModal from '../features/devices/DeviceDetailModal';
+import WaterSupplyGauge from '../features/devices/WaterSupplyGauge';
 import {getProductDefinition} from '../features/devices/deviceRegistry';
-import {Device} from '../features/devices/types';
+import {getDeviceStatusLabel} from '../features/devices/deviceStatusLabel';
+import {
+  lightScreenBackground,
+  lightScreenBackgroundColor,
+} from '../features/devices/deviceTheme';
+import {
+  GROWTH_CYCLE_DAYS,
+  getGrowthProgress,
+} from '../features/devices/growthProgress';
+import HapticPressable from '../features/devices/HapticPressable';
+import {getProductImageSource} from '../features/devices/productAssets';
+import {
+  getNextSprayText,
+  getRemainingAutoNextRunMs,
+} from '../features/devices/runtimeDisplay';
+import {Device, DeviceStatus} from '../features/devices/types';
 import {useDevices} from '../features/devices/useDevices';
 
+const WATER_CYCLE_REFERENCE_MS = 20 * 60 * 1000;
+const MIN_ACTIVE_WATER_PROGRESS = 0.18;
+const LIGHT_CARD_COLOR = '#dfe1e3';
+
 function MainTab() {
+  const carouselRef = useRef<ScrollView>(null);
+  const {width: screenWidth} = useWindowDimensions();
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [pendingPowerDeviceId, setPendingPowerDeviceId] = useState<
-    string | null
-  >(null);
+  const [activeDeviceIndex, setActiveDeviceIndex] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const {
     devices,
     selectedDevice,
@@ -32,106 +56,197 @@ function MainTab() {
     setSelectedDevice,
   } = useDevices();
 
-  const groupedDevices = useMemo(() => {
-    return devices.reduce<Record<string, Device[]>>((groups, device) => {
-      const product = getProductDefinition(device.type);
-      const key = product.sectionLabel;
-      groups[key] = [...(groups[key] ?? []), device];
-      return groups;
-    }, {});
-  }, [devices]);
+  const carouselWidth = Math.max(screenWidth - 54, 280);
+  const activeDevice = devices[activeDeviceIndex];
+  const activeGrowth = useMemo(
+    () =>
+      activeDevice
+        ? getGrowthProgress(activeDevice.growthStartedAt, now)
+        : null,
+    [activeDevice, now],
+  );
+  const nextSprayText = useMemo(
+    () => (activeDevice ? getNextSprayText(activeDevice.runtime, now) : ''),
+    [activeDevice, now],
+  );
+  const waterCycleProgress = useMemo(
+    () => (activeDevice ? getWaterCycleProgress(activeDevice, now) : 0),
+    [activeDevice, now],
+  );
 
-  const toggleDevicePower = async (device: Device) => {
-    if (pendingPowerDeviceId) {
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (devices.length === 0) {
+      setActiveDeviceIndex(0);
       return;
     }
 
-    const nextValue = !device.controls.running;
-    setPendingPowerDeviceId(device.id);
-
-    try {
-      await sendDeviceCommand({
-        device,
-        command: 'running',
-        value: nextValue,
-      });
-      updateDevice(device.id, current => ({
-        ...current,
-        status: 'online',
-        controls: {
-          ...current.controls,
-          running: nextValue,
-        },
-      }));
-    } catch {
-      Alert.alert(
-        '명령 전송 실패',
-        '기기에 전원 명령을 보내지 못했습니다. 장치 IP와 Wi-Fi 연결을 확인해주세요.',
-      );
-      updateDevice(device.id, current => ({
-        ...current,
-        status: 'offline',
-      }));
-    } finally {
-      setPendingPowerDeviceId(null);
+    if (activeDeviceIndex >= devices.length) {
+      setActiveDeviceIndex(devices.length - 1);
     }
+  }, [activeDeviceIndex, devices.length]);
+
+  useEffect(() => {
+    carouselRef.current?.scrollTo({
+      animated: false,
+      x: activeDeviceIndex * carouselWidth,
+      y: 0,
+    });
+  }, [activeDeviceIndex, carouselWidth]);
+
+  const handleDeviceCarouselScroll = (
+    event: NativeSyntheticEvent<NativeScrollEvent>,
+  ) => {
+    const nextIndex = Math.round(
+      event.nativeEvent.contentOffset.x / carouselWidth,
+    );
+    setActiveDeviceIndex(
+      Math.min(Math.max(nextIndex, 0), Math.max(devices.length - 1, 0)),
+    );
   };
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
-      <StatusBar barStyle="dark-content" backgroundColor="#eef7ff" />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={lightScreenBackgroundColor}
+      />
       <View style={styles.header}>
         <View>
           <Text style={styles.homeLabel}>시루야</Text>
           <Text style={styles.headerSub}>
-            연결됨 {onlineCount}대 · 전체 {devices.length}대
+            연결됨 {onlineCount}대 전체 {devices.length}대
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <Pressable
+          <DeviceActionButton
             accessibilityLabel="알림"
-            style={styles.iconButton}
+            style={styles.notificationButton}
+            contentStyle={styles.notificationButtonContent}
             onPress={() => Alert.alert('알림', '새 알림이 없습니다.')}>
-            <Text style={styles.iconButtonText}>!</Text>
-          </Pressable>
-          <Pressable
-            accessibilityLabel="장치 추가"
-            style={[styles.iconButton, styles.addButton]}
-            onPress={() => setIsAddOpen(true)}>
-            <Text style={[styles.iconButtonText, styles.addButtonText]}>+</Text>
-          </Pressable>
+            <View style={styles.iconWrap}>
+              <Image
+                source={require('../assets/images/main_bell_icon.png')}
+                resizeMode="contain"
+                style={styles.notificationIcon}
+              />
+              <View style={styles.notificationBadge} />
+            </View>
+          </DeviceActionButton>
         </View>
       </View>
 
       <ScrollView
         style={styles.content}
-        contentContainerStyle={styles.contentInner}
+        contentContainerStyle={[
+          styles.contentInner,
+          devices.length === 0 && styles.emptyContentInner,
+        ]}
+        scrollEnabled={devices.length === 0}
         showsVerticalScrollIndicator={false}>
-        {Object.entries(groupedDevices).map(([section, sectionDevices]) => (
-          <View key={section}>
-            <Text style={styles.sectionLabel}>{section}</Text>
-            <View style={styles.grid}>
-              {sectionDevices.map(device => (
-                <DeviceCard
+        {devices.length > 0 && activeDevice && activeGrowth ? (
+          <View style={styles.registeredHome}>
+            <ScrollView
+              ref={carouselRef}
+              horizontal
+              pagingEnabled
+              decelerationRate="fast"
+              snapToInterval={carouselWidth}
+              showsHorizontalScrollIndicator={false}
+              style={[styles.deviceCarousel, {width: carouselWidth}]}
+              onMomentumScrollEnd={handleDeviceCarouselScroll}>
+              {devices.map(device => (
+                <DeviceHeroSlide
                   key={device.id}
                   device={device}
+                  width={carouselWidth}
                   onPress={() => setSelectedDevice(device)}
-                  onPower={() => toggleDevicePower(device)}
                 />
               ))}
+            </ScrollView>
+
+            {devices.length > 1 && (
+              <View style={styles.carouselDots}>
+                {devices.map((device, index) => (
+                  <View
+                    key={device.id}
+                    style={[
+                      styles.carouselDot,
+                      index === activeDeviceIndex && styles.carouselDotActive,
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
+
+            <View style={[styles.metricGrid, {width: carouselWidth}]}>
+              <View style={[styles.metricCard, styles.waterCycleCard]}>
+                <Text style={styles.metricTitle}>물 공급주기</Text>
+                <View style={styles.waterGaugeSlot}>
+                  <WaterSupplyGauge
+                    backgroundColor={LIGHT_CARD_COLOR}
+                    progress={waterCycleProgress}
+                    value={nextSprayText}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.sideMetricColumn}>
+                <ControlStatusCard
+                  active
+                  effect="airflow"
+                  title="팬 작동"
+                  tone="dark"
+                />
+                <ControlStatusCard
+                  active={activeDevice.controls.water}
+                  title="물 공급"
+                  tone="light"
+                />
+              </View>
+            </View>
+
+            <View style={[styles.growthCard, {width: carouselWidth}]}>
+              <Text style={styles.metricTitle}>성장 진행</Text>
+              <View style={styles.growthLabels}>
+                <Text style={styles.growthLabel}>시작</Text>
+                <Text style={styles.growthLabel}>{GROWTH_CYCLE_DAYS}일</Text>
+              </View>
+              <View style={styles.growthTrack}>
+                <View
+                  style={[
+                    styles.growthFill,
+                    {width: `${activeGrowth.progressPercent}%`},
+                  ]}
+                />
+              </View>
             </View>
           </View>
-        ))}
-
-        <Text style={styles.sectionLabel}>기기 관리</Text>
-        <View style={styles.carePanel}>
-          <Text style={styles.careTitle}>청소 모드 안내</Text>
-          <Text style={styles.careText}>
-            콩나물을 다 키운 뒤 기기를 열고 청소 모드를 실행하면 펌프로
-            물을 순환시켜 내부를 세척합니다.
-          </Text>
-        </View>
+        ) : (
+          <View style={styles.emptyHome}>
+            <Text style={styles.emptyTitle}>등록된 기기가 없습니다</Text>
+            <Text style={styles.emptyText}>
+              장치를 추가하면 홈에서 제품 상태와 성장 진행을 확인할 수
+              있습니다.
+            </Text>
+          </View>
+        )}
       </ScrollView>
+
+      <View style={styles.addDeviceDock}>
+        <DeviceActionButton
+          accessibilityLabel="장치 추가"
+          contentStyle={styles.addDeviceButtonContent}
+          style={styles.addDeviceButton}
+          onPress={() => setIsAddOpen(true)}>
+          <Text style={styles.addDeviceIcon}>+</Text>
+          <Text style={styles.addDeviceText}>장치 추가</Text>
+        </DeviceActionButton>
+      </View>
 
       <AddDeviceModal
         visible={isAddOpen}
@@ -148,18 +263,161 @@ function MainTab() {
   );
 }
 
+function DeviceHeroSlide({
+  device,
+  onPress,
+  width,
+}: {
+  device: Device;
+  onPress: () => void;
+  width: number;
+}) {
+  const product = getProductDefinition(device.type);
+  const productImage = getProductImageSource(device.type);
+
+  return (
+    <HapticPressable
+      accessibilityLabel={`${device.name} 상세 보기`}
+      onPress={onPress}
+      style={[styles.heroSlide, {width}]}>
+      <View style={styles.heroCard}>
+        <View style={styles.heroCopy}>
+          <Text style={styles.heroRoom} numberOfLines={1}>
+            {device.room}
+          </Text>
+          <Text style={styles.heroName} numberOfLines={1}>
+            {device.name}
+          </Text>
+        </View>
+        <DeviceStatusBadge status={device.status} />
+        <View style={styles.heroImageStage}>
+          {productImage ? (
+            <Image
+              source={productImage}
+              resizeMode="contain"
+              style={styles.heroProductImage}
+            />
+          ) : (
+            <View style={styles.productImageFallback}>
+              <Text style={styles.productImageFallbackText}>
+                {product.badge}
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </HapticPressable>
+  );
+}
+
+function DeviceStatusBadge({status}: {status: DeviceStatus}) {
+  const isOnline = status === 'online';
+
+  return (
+    <View
+      style={[
+        styles.statusBadge,
+        isOnline ? styles.statusBadgeOnline : styles.statusBadgeMuted,
+      ]}>
+      <Text
+        style={[
+          styles.statusBadgeText,
+          isOnline ? styles.statusBadgeTextOnline : styles.statusBadgeTextMuted,
+        ]}>
+        {getDeviceStatusLabel(status)}
+      </Text>
+    </View>
+  );
+}
+
+function ControlStatusCard({
+  active,
+  effect,
+  title,
+  tone,
+}: {
+  active: boolean;
+  effect?: 'airflow';
+  title: string;
+  tone: 'dark' | 'light';
+}) {
+  const isDark = tone === 'dark';
+
+  return (
+    <View
+      style={[
+        styles.controlCard,
+        isDark ? styles.controlCardDark : styles.controlCardLight,
+      ]}>
+      {effect === 'airflow' && (
+        <AirFlowEffect active={active} style={styles.airFlowLayer} />
+      )}
+      <View style={styles.controlHeader}>
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.metricTitle,
+            isDark && styles.metricTitleOnDark,
+          ]}>
+          {title}
+        </Text>
+        <ControlStatusBadge active={active} />
+      </View>
+    </View>
+  );
+}
+
+function ControlStatusBadge({active}: {active: boolean}) {
+  return (
+    <View
+      style={[
+        styles.controlStatusBadge,
+        active ? styles.controlStatusBadgeOn : styles.controlStatusBadgeOff,
+      ]}>
+      <Text
+        style={[
+          styles.controlStatusText,
+          active ? styles.controlStatusTextOn : styles.controlStatusTextOff,
+        ]}>
+        {active ? '켜짐' : '꺼짐'}
+      </Text>
+    </View>
+  );
+}
+
+function getWaterCycleProgress(device: Device, now: number) {
+  if (device.runtime?.autoState === 'watering') {
+    return 1;
+  }
+
+  if (device.runtime?.autoState === 'preparing') {
+    return 0.88;
+  }
+
+  const remainingMs = getRemainingAutoNextRunMs(device.runtime, now);
+
+  if (remainingMs <= 0) {
+    return 0;
+  }
+
+  return Math.max(
+    MIN_ACTIVE_WATER_PROGRESS,
+    1 - Math.min(remainingMs, WATER_CYCLE_REFERENCE_MS) / WATER_CYCLE_REFERENCE_MS,
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
+    ...lightScreenBackground,
     flex: 1,
-    backgroundColor: '#eef7ff',
   },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
+    paddingBottom: 8,
     paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 12,
+    paddingTop: 14,
   },
   homeLabel: {
     color: '#111827',
@@ -167,70 +425,394 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   headerSub: {
-    color: '#64748b',
+    color: '#9ca3af',
     fontSize: 13,
+    fontWeight: '700',
     marginTop: 4,
   },
   headerActions: {
     flexDirection: 'row',
-    gap: 10,
   },
-  iconButton: {
+  notificationButton: {
+    borderRadius: 23,
+    height: 46,
+    minHeight: 46,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    width: 46,
+  },
+  notificationButtonContent: {
+    height: '100%',
+    width: '100%',
+  },
+  iconWrap: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.82)',
-    borderRadius: 18,
-    height: 36,
+    height: 24,
     justifyContent: 'center',
-    width: 36,
+    width: 24,
   },
-  addButton: {
-    backgroundColor: '#1d9bf0',
+  notificationIcon: {
+    height: 20,
+    tintColor: '#323232',
+    width: 20,
   },
-  iconButtonText: {
-    color: '#111827',
-    fontSize: 21,
-    fontWeight: '700',
-    lineHeight: 24,
-  },
-  addButtonText: {
-    color: '#ffffff',
-    fontSize: 25,
+  notificationBadge: {
+    backgroundColor: '#d60000',
+    borderRadius: 4.5,
+    boxShadow: [
+      {
+        blurRadius: 2,
+        color: 'rgba(0,0,0,0.4)',
+        inset: true,
+        offsetX: -1,
+        offsetY: -1,
+      },
+      {
+        blurRadius: 1,
+        color: 'rgba(255,255,255,0.8)',
+        inset: true,
+        offsetX: 1,
+        offsetY: 1,
+      },
+      {
+        blurRadius: 2,
+        color: 'rgba(0,0,0,0.5)',
+        offsetX: 1,
+        offsetY: 1,
+      },
+    ],
+    experimental_backgroundImage:
+      'radial-gradient(circle at 30% 30%, #ff8a8a, #d60000)',
+    height: 9,
+    pointerEvents: 'none',
+    position: 'absolute',
+    right: -2,
+    top: -2,
+    width: 9,
   },
   content: {
     flex: 1,
   },
   contentInner: {
-    paddingBottom: 30,
+    alignItems: 'center',
+    flexGrow: 1,
+    paddingBottom: 4,
+    paddingHorizontal: 18,
+    paddingTop: 2,
+  },
+  emptyContentInner: {
+    justifyContent: 'center',
+  },
+  registeredHome: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  deviceCarousel: {
+    alignSelf: 'center',
+    flexGrow: 0,
+  },
+  heroSlide: {
+    paddingHorizontal: 0,
+  },
+  heroCard: {
+    backgroundColor: '#202123',
+    borderRadius: 20,
+    boxShadow: [
+      {
+        blurRadius: 22,
+        color: 'rgba(20,20,20,0.18)',
+        offsetX: 0,
+        offsetY: 16,
+        spreadDistance: -10,
+      },
+    ],
+    height: 286,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '100%',
+  },
+  heroCopy: {
+    left: 16,
+    maxWidth: '67%',
+    position: 'absolute',
+    top: 18,
+    zIndex: 2,
+  },
+  heroRoom: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+    opacity: 0.9,
+  },
+  heroName: {
+    color: '#ffffff',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 0,
+    marginTop: 4,
+  },
+  heroImageStage: {
+    alignItems: 'center',
+    bottom: 10,
+    justifyContent: 'center',
+    left: 22,
+    position: 'absolute',
+    right: 22,
+    top: 72,
+  },
+  heroProductImage: {
+    height: '100%',
+    width: '90%',
+  },
+  productImageFallback: {
+    alignItems: 'center',
+    backgroundColor: '#9ca3af',
+    height: 112,
+    justifyContent: 'center',
+    width: 90,
+  },
+  productImageFallbackText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  statusBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    position: 'absolute',
+    right: 14,
+    top: 18,
+    zIndex: 3,
+  },
+  statusBadgeOnline: {
+    backgroundColor: '#19d832',
+  },
+  statusBadgeMuted: {
+    backgroundColor: '#e5e7eb',
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    lineHeight: 12,
+  },
+  statusBadgeTextOnline: {
+    color: '#ffffff',
+  },
+  statusBadgeTextMuted: {
+    color: '#374151',
+  },
+  carouselDots: {
+    flexDirection: 'row',
+    gap: 6,
+    height: 10,
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  carouselDot: {
+    backgroundColor: '#cfd4d8',
+    borderRadius: 3,
+    height: 6,
+    width: 6,
+  },
+  carouselDotActive: {
+    backgroundColor: '#232323',
+    width: 16,
+  },
+  metricGrid: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 14,
+  },
+  metricCard: {
+    backgroundColor: LIGHT_CARD_COLOR,
+    borderRadius: 16,
+    boxShadow: [
+      {
+        blurRadius: 20,
+        color: 'rgba(0,0,0,0.11)',
+        offsetX: 0,
+        offsetY: 14,
+        spreadDistance: -13,
+      },
+    ],
+    paddingHorizontal: 14,
+    paddingTop: 14,
+  },
+  waterCycleCard: {
+    flex: 1,
+    height: 176,
+  },
+  metricTitle: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  metricTitleOnDark: {
+    color: '#ffffff',
+  },
+  waterGaugeSlot: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    paddingBottom: 8,
+  },
+  sideMetricColumn: {
+    flex: 1,
+    gap: 12,
+  },
+  controlCard: {
+    borderRadius: 16,
+    flex: 1,
+    minHeight: 82,
+    overflow: 'hidden',
+    paddingHorizontal: 14,
+    paddingTop: 13,
+    position: 'relative',
+  },
+  controlCardDark: {
+    backgroundColor: '#15171b',
+    boxShadow: [
+      {
+        blurRadius: 18,
+        color: 'rgba(0,0,0,0.16)',
+        offsetX: 0,
+        offsetY: 12,
+        spreadDistance: -12,
+      },
+    ],
+  },
+  controlCardLight: {
+    backgroundColor: LIGHT_CARD_COLOR,
+    boxShadow: [
+      {
+        blurRadius: 20,
+        color: 'rgba(0,0,0,0.11)',
+        offsetX: 0,
+        offsetY: 14,
+        spreadDistance: -13,
+      },
+    ],
+  },
+  controlHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+    zIndex: 2,
+  },
+  airFlowLayer: {
+    bottom: 0,
+    height: 62,
+    left: 0,
+    opacity: 0.95,
+    position: 'absolute',
+    right: 0,
+  },
+  controlStatusBadge: {
+    borderRadius: 999,
+    minWidth: 28,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  controlStatusBadgeOn: {
+    backgroundColor: '#19d832',
+  },
+  controlStatusBadgeOff: {
+    backgroundColor: '#d1d5db',
+  },
+  controlStatusText: {
+    fontSize: 9,
+    fontWeight: '900',
+    lineHeight: 11,
+    textAlign: 'center',
+  },
+  controlStatusTextOn: {
+    color: '#ffffff',
+  },
+  controlStatusTextOff: {
+    color: '#4b5563',
+  },
+  growthCard: {
+    backgroundColor: LIGHT_CARD_COLOR,
+    borderRadius: 16,
+    boxShadow: [
+      {
+        blurRadius: 20,
+        color: 'rgba(0,0,0,0.11)',
+        offsetX: 0,
+        offsetY: 14,
+        spreadDistance: -13,
+      },
+    ],
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  growthLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  growthLabel: {
+    color: '#4b5563',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  growthTrack: {
+    backgroundColor: '#ffffff',
+    borderRadius: 999,
+    height: 18,
+    marginTop: 5,
+    overflow: 'hidden',
+  },
+  growthFill: {
+    backgroundColor: '#73ff35',
+    borderRadius: 999,
+    height: '100%',
+  },
+  emptyHome: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
     paddingHorizontal: 18,
   },
-  sectionLabel: {
-    color: '#94a3b8',
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 12,
-    marginTop: 26,
-    paddingHorizontal: 4,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-  },
-  carePanel: {
-    backgroundColor: '#ffffff',
-    borderRadius: 8,
-    padding: 18,
-  },
-  careTitle: {
+  emptyTitle: {
     color: '#111827',
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'center',
   },
-  careText: {
+  emptyText: {
     color: '#64748b',
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  addDeviceDock: {
+    paddingBottom: 14,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+  },
+  addDeviceButton: {
+    width: '100%',
+  },
+  addDeviceButtonContent: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  addDeviceIcon: {
+    color: '#323232',
+    fontSize: 24,
+    fontWeight: '900',
+    lineHeight: 26,
+  },
+  addDeviceText: {
+    color: '#323232',
+    fontSize: 17,
+    fontWeight: '900',
   },
 });
 

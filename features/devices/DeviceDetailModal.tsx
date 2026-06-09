@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -12,17 +11,23 @@ import {
   View,
 } from 'react-native';
 import {sendDeviceCommand, sendFirmwareUpdateCommand} from './deviceCommands';
+import {lightScreenBackground, lightScreenBackgroundColor} from './deviceTheme';
+import {getDeviceStatusLabel} from './deviceStatusLabel';
 import {getProductDefinition} from './deviceRegistry';
 import {ControlRow} from './DeviceFormFields';
 import {
   fetchFirmwareManifest,
   hasDifferentFirmwareVersion,
 } from './firmwareManifest';
+import {createEmptyRuntime} from './deviceRuntime';
 import {
   getAutoStateLabel,
+  getFirmwareStatusLabel,
   getNextSprayText,
   hasActiveAutoCountdown,
 } from './runtimeDisplay';
+import {getGrowthProgress, shiftGrowthStartedAt} from './growthProgress';
+import HapticPressable from './HapticPressable';
 import {Device, DeviceCommand, DeviceRuntime, DeviceUpdater} from './types';
 
 type Props = {
@@ -107,6 +112,14 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
     Boolean(device.runtime?.firmwareVersion) &&
     firmwareStatus === 'available' &&
     !isFirmwareUpdating;
+  const growthProgress = getGrowthProgress(device.growthStartedAt);
+
+  const setGrowthStartedAt = (growthStartedAt: number) => {
+    onUpdate(device.id, current => ({
+      ...current,
+      growthStartedAt,
+    }));
+  };
 
   const runCommand = async (command: DeviceCommand) => {
     if (pendingCommand || isFirmwareUpdating) {
@@ -247,18 +260,21 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.screen}>
-        <StatusBar barStyle="dark-content" backgroundColor="#f8fafc" />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={lightScreenBackgroundColor}
+        />
         <View style={styles.header}>
-          <Pressable onPress={onClose} style={styles.closeButton}>
+          <HapticPressable onPress={onClose} style={styles.closeButton}>
             <Text style={styles.closeText}>x</Text>
-          </Pressable>
+          </HapticPressable>
           <Text style={styles.title}>{device.name}</Text>
-          <Pressable
+          <HapticPressable
             accessibilityLabel="기기 제거"
             onPress={confirmRemove}
             style={styles.removeHeaderButton}>
             <Text style={styles.removeHeaderText}>제거</Text>
-          </Pressable>
+          </HapticPressable>
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
@@ -268,7 +284,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
             </View>
             <Text style={styles.name}>{device.name}</Text>
             <Text style={styles.meta}>
-              {device.room} · {device.status === 'online' ? '온라인' : '오프라인'}
+              {device.room} · {getDeviceStatusLabel(device.status)}
             </Text>
             {device.isDemo && (
               <View style={styles.demoBadge}>
@@ -299,6 +315,51 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
               active={Boolean(device.runtime?.autoRunning)}
             />
             <NextSprayStatusPill runtime={device.runtime} />
+          </View>
+
+          <View style={styles.growthPanel}>
+            <View style={styles.growthHeader}>
+              <View>
+                <Text style={styles.growthTitle}>성장 진행</Text>
+                <Text style={styles.growthText}>{growthProgress.summary}</Text>
+              </View>
+              <Text style={styles.growthPercent}>
+                {growthProgress.progressPercent}%
+              </Text>
+            </View>
+            <View style={styles.growthTrack}>
+              <View
+                style={[
+                  styles.growthFill,
+                  {width: `${growthProgress.progressPercent}%`},
+                ]}
+              />
+            </View>
+            <View style={styles.growthActions}>
+              <HapticPressable
+                style={styles.growthActionButton}
+                onPress={() =>
+                  setGrowthStartedAt(
+                    shiftGrowthStartedAt(device.growthStartedAt, -1),
+                  )
+                }>
+                <Text style={styles.growthActionText}>-1일</Text>
+              </HapticPressable>
+              <HapticPressable
+                style={styles.growthActionButton}
+                onPress={() => setGrowthStartedAt(Date.now())}>
+                <Text style={styles.growthActionText}>오늘로 시작</Text>
+              </HapticPressable>
+              <HapticPressable
+                style={styles.growthActionButton}
+                onPress={() =>
+                  setGrowthStartedAt(
+                    shiftGrowthStartedAt(device.growthStartedAt, 1),
+                  )
+                }>
+                <Text style={styles.growthActionText}>+1일</Text>
+              </HapticPressable>
+            </View>
           </View>
 
           {(pendingCommand || isSendingFirmwareCommand) && (
@@ -336,7 +397,14 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
                 onValueChange={() => runCommand('fan')}
                 disabled={Boolean(pendingCommand) || isFirmwareUpdating}
               />
-              <Pressable
+              <View style={styles.cleanGuidePanel}>
+                <Text style={styles.cleanGuideTitle}>청소 모드 안내</Text>
+                <Text style={styles.cleanGuideText}>
+                  콩나물을 다 키운 뒤 기기를 열고 청소 모드를 실행하면
+                  펌프로 물을 순환시켜 내부를 세척합니다.
+                </Text>
+              </View>
+              <HapticPressable
                 style={[
                   styles.cleanButton,
                   device.controls.cleanMode && styles.cleanButtonActive,
@@ -366,7 +434,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
                   ]}>
                   {device.controls.cleanMode ? '실행 중' : '시작'}
                 </Text>
-              </Pressable>
+              </HapticPressable>
             </>
           ) : (
             <View style={styles.emptyPanel}>
@@ -387,7 +455,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
                   : ''}
               </Text>
               <Text style={styles.firmwareState}>
-                {firmwareStatusLabel(firmwareStatus, firmwareProgress)}
+                {getFirmwareStatusLabel(firmwareStatus, firmwareProgress)}
               </Text>
               {isFirmwareUpdating && (
                 <View style={styles.progressTrack}>
@@ -400,7 +468,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
                 </View>
               )}
             </View>
-            <Pressable
+            <HapticPressable
               style={[
                 styles.firmwareButton,
                 !canUpdateFirmware && styles.firmwareButtonDisabled,
@@ -410,12 +478,12 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
               <Text style={styles.firmwareButtonText}>
                 {isFirmwareUpdating ? '진행 중' : '업데이트'}
               </Text>
-            </Pressable>
+            </HapticPressable>
           </View>
 
-          <Pressable style={styles.removeButton} onPress={confirmRemove}>
+          <HapticPressable style={styles.removeButton} onPress={confirmRemove}>
             <Text style={styles.removeButtonText}>이 기기 제거</Text>
-          </Pressable>
+          </HapticPressable>
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -460,39 +528,9 @@ function NextSprayStatusPill({runtime}: {runtime?: DeviceRuntime}) {
   return <StatusPill label="다음 분사" value={value} active={active} />;
 }
 
-function createEmptyRuntime(): DeviceRuntime {
-  return {
-    autoState: 'idle',
-    autoRunning: false,
-    autoNextRunInMs: 0,
-    interlockOk: false,
-    fanRunLeftMs: 0,
-  };
-}
-
-function firmwareStatusLabel(status: string, progress: number) {
-  if (status === 'available') {
-    return '업데이트 가능';
-  }
-
-  if (status === 'updating') {
-    return progress > 0 ? `업데이트 중 ${progress}%` : '업데이트 준비 중';
-  }
-
-  if (status === 'updated') {
-    return '최신 버전 적용 완료';
-  }
-
-  if (status === 'failed') {
-    return '업데이트 실패';
-  }
-
-  return '최신 상태 확인 대기';
-}
-
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: '#f8fafc',
+    ...lightScreenBackground,
     flex: 1,
   },
   header: {
@@ -614,6 +652,65 @@ const styles = StyleSheet.create({
   statusValueActive: {
     color: '#075985',
   },
+  growthPanel: {
+    backgroundColor: '#ffffff',
+    borderColor: '#dbeafe',
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 16,
+  },
+  growthHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  growthTitle: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  growthText: {
+    color: '#64748b',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  growthPercent: {
+    color: '#0f766e',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  growthTrack: {
+    backgroundColor: '#e2e8f0',
+    borderRadius: 999,
+    height: 9,
+    marginTop: 14,
+    overflow: 'hidden',
+  },
+  growthFill: {
+    backgroundColor: '#0f766e',
+    borderRadius: 999,
+    height: 9,
+  },
+  growthActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 14,
+  },
+  growthActionButton: {
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 38,
+  },
+  growthActionText: {
+    color: '#334155',
+    fontSize: 13,
+    fontWeight: '900',
+  },
   busyPanel: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
@@ -687,6 +784,23 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 13,
     fontWeight: '900',
+  },
+  cleanGuidePanel: {
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    marginTop: 12,
+    padding: 16,
+  },
+  cleanGuideTitle: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  cleanGuideText: {
+    color: '#64748b',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 8,
   },
   cleanButton: {
     alignItems: 'center',

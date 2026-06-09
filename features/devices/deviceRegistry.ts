@@ -27,9 +27,13 @@ export const productDefinitions: ProductDefinition[] = [
   },
 ];
 
+const starterDeviceCreatedAt = Date.now();
+
 export const starterDevices: Device[] = [
   {
     id: 'sprout-demo-1',
+    registeredAt: starterDeviceCreatedAt,
+    growthStartedAt: starterDeviceCreatedAt,
     name: '콩나물재배기',
     type: 'sprout-grower',
     room: '베란다',
@@ -59,10 +63,13 @@ export function createDevice(params: {
   hardwareId?: string;
 }): Device {
   const product = getProductDefinition(params.type);
+  const createdAt = Date.now();
 
   return {
-    id: `${params.type}-${Date.now()}`,
+    id: `${params.type}-${createdAt}`,
     hardwareId: params.hardwareId,
+    registeredAt: createdAt,
+    growthStartedAt: createdAt,
     name: params.name.trim() || product.defaultName,
     type: params.type,
     room: params.room.trim() || product.defaultRoom,
