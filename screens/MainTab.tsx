@@ -32,18 +32,15 @@ import HapticPressable from '../features/devices/HapticPressable';
 import {getProductImageSource} from '../features/devices/productAssets';
 import {
   getNextSprayText,
-  getRemainingAutoNextRunMs,
+  getWaterCycleProgress,
 } from '../features/devices/runtimeDisplay';
 import {Device, DeviceStatus} from '../features/devices/types';
 import {useDevices} from '../features/devices/useDevices';
 
-const WATER_CYCLE_REFERENCE_MS = 20 * 60 * 1000;
-const MIN_ACTIVE_WATER_PROGRESS = 0.18;
 const LIGHT_CARD_COLOR = '#dfe1e3';
+const FORCE_WATER_SUPPLY_CARD_ACTIVE = false;
 const WATER_SUPPLY_CARD_BACKGROUND = require('../assets/images/effects/water-supply-nature.png');
-const WATER_SUPPLY_VIDEO_SOURCE = {
-  uri: require('../assets/video/water-supply.mp4'),
-};
+const WATER_SUPPLY_VIDEO_SOURCE = require('../assets/video/water-supply.mp4');
 
 function MainTab() {
   const carouselRef = useRef<ScrollView>(null);
@@ -178,7 +175,9 @@ function MainTab() {
                   tone="dark"
                 />
                 <ControlStatusCard
-                  active={activeDevice.controls.water}
+                  active={
+                    FORCE_WATER_SUPPLY_CARD_ACTIVE || activeDevice.controls.water
+                  }
                   effect="waterVideo"
                   title="물 공급"
                   tone="light"
@@ -299,8 +298,8 @@ function WaterCycleMetricCard({device}: {device: Device}) {
     [device.runtime, now],
   );
   const waterCycleProgress = useMemo(
-    () => getWaterCycleProgress(device, now),
-    [device, now],
+    () => getWaterCycleProgress(device.runtime, now),
+    [device.runtime, now],
   );
 
   useEffect(() => {
@@ -372,7 +371,10 @@ function ControlStatusCard({
           <Image
             resizeMode="cover"
             source={WATER_SUPPLY_CARD_BACKGROUND}
-            style={styles.waterSupplyImage}
+            style={[
+              styles.waterSupplyImage,
+              !active && styles.waterSupplyInactiveMedia,
+            ]}
           />
           <Video
             controls={false}
@@ -381,7 +383,10 @@ function ControlStatusCard({
             repeat
             resizeMode={ResizeMode.COVER}
             source={WATER_SUPPLY_VIDEO_SOURCE}
-            style={styles.waterSupplyVideo}
+            style={[
+              styles.waterSupplyVideo,
+              !active && styles.waterSupplyInactiveMedia,
+            ]}
           />
           <View style={styles.waterSupplyImageOverlay} />
         </>
@@ -419,27 +424,6 @@ function ControlStatusBadge({active}: {active: boolean}) {
         {active ? '켜짐' : '꺼짐'}
       </Text>
     </View>
-  );
-}
-
-function getWaterCycleProgress(device: Device, now: number) {
-  if (device.runtime?.autoState === 'watering') {
-    return 1;
-  }
-
-  if (device.runtime?.autoState === 'preparing') {
-    return 0.88;
-  }
-
-  const remainingMs = getRemainingAutoNextRunMs(device.runtime, now);
-
-  if (remainingMs <= 0) {
-    return 0;
-  }
-
-  return Math.max(
-    MIN_ACTIVE_WATER_PROGRESS,
-    1 - Math.min(remainingMs, WATER_CYCLE_REFERENCE_MS) / WATER_CYCLE_REFERENCE_MS,
   );
 }
 
@@ -680,7 +664,7 @@ const styles = StyleSheet.create({
   },
   waterCycleCard: {
     flex: 1,
-    height: 176,
+    height: 192,
   },
   metricTitle: {
     color: '#111827',
@@ -775,6 +759,10 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     zIndex: 1,
+  },
+  waterSupplyInactiveMedia: {
+    filter: [{blur: 3}],
+    transform: [{scale: 1.03}],
   },
   controlStatusBadge: {
     borderRadius: 999,

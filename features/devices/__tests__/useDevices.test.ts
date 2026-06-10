@@ -8,6 +8,8 @@ import {
 } from '../useDevices';
 import {Device, DeviceRuntime} from '../types';
 
+let mockDeviceWebSocketListener: ((message: unknown) => void) | undefined;
+
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(),
   setItem: jest.fn(),
@@ -19,7 +21,10 @@ jest.mock('../deviceCommands', () => ({
 
 jest.mock('../deviceWebSocket', () => ({
   reconnectDeviceWebSocket: jest.fn(),
-  subscribeDeviceWebSocket: jest.fn(() => jest.fn()),
+  subscribeDeviceWebSocket: jest.fn(listener => {
+    mockDeviceWebSocketListener = listener;
+    return jest.fn();
+  }),
 }));
 
 const idleRuntime: DeviceRuntime = {
@@ -32,6 +37,20 @@ const idleRuntime: DeviceRuntime = {
 
 function UseDevicesProbe() {
   useDevices();
+  return null;
+}
+
+function UseDevicesObserver({
+  onChange,
+}: {
+  onChange: (api: ReturnType<typeof useDevices>) => void;
+}) {
+  const api = useDevices();
+
+  React.useEffect(() => {
+    onChange(api);
+  }, [api, onChange]);
+
   return null;
 }
 
@@ -163,6 +182,36 @@ describe('mergePolledDeviceStatuses', () => {
 
     expect(nextDevices).toBe(devices);
   });
+
+  it('keeps the same list when only the countdown anchor is equivalent', () => {
+    const localDevice = createDevice({
+      id: 'local-device',
+      ipAddress: '192.168.0.10',
+      runtime: {
+        ...idleRuntime,
+        autoNextRunInMs: 10_000,
+        lastSeenAt: 1_000,
+      },
+    });
+    const devices = [localDevice];
+    const refreshedLocalDevice = createDevice({
+      id: 'local-device',
+      status: 'online',
+      ipAddress: '192.168.0.10',
+      runtime: {
+        ...idleRuntime,
+        autoNextRunInMs: 9_000,
+        lastSeenAt: 2_000,
+      },
+    });
+
+    const nextDevices = mergePolledDeviceStatuses(
+      devices,
+      new Map([[refreshedLocalDevice.id, refreshedLocalDevice]]),
+    );
+
+    expect(nextDevices).toBe(devices);
+  });
 });
 
 describe('shouldPersistDevices', () => {
@@ -180,12 +229,102 @@ describe('shouldPersistDevices', () => {
   });
 });
 
+describe('useDevices device contact freshness', () => {
+  const asyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(0);
+    jest.clearAllMocks();
+    mockDeviceWebSocketListener = undefined;
+    asyncStorage.getItem.mockResolvedValue(null);
+    asyncStorage.setItem.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('does not mark an online device stale when websocket contact is fresh but the countdown anchor is frozen', async () => {
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(
+        createDevice({
+          id: 'cloud-device',
+          hardwareId: 'HW-1',
+          status: 'offline',
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      jest.setSystemTime(1_000);
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: {
+          sta_connected: true,
+          system_enabled: true,
+          interlock_ok: true,
+          pump_on: false,
+          fan_on: false,
+          auto_state: 0,
+          auto_next_run_in_ms: 100_000,
+        },
+      });
+    });
+
+    await ReactTestRenderer.act(async () => {
+      jest.setSystemTime(11_000);
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: {
+          sta_connected: true,
+          system_enabled: true,
+          interlock_ok: true,
+          pump_on: false,
+          fan_on: false,
+          auto_state: 0,
+          auto_next_run_in_ms: 90_000,
+        },
+      });
+    });
+
+    expect(latestApi?.devices[0].runtime?.lastSeenAt).toBe(1_000);
+
+    await ReactTestRenderer.act(async () => {
+      jest.setSystemTime(20_000);
+      jest.advanceTimersByTime(5_000);
+    });
+
+    expect(latestApi?.devices[0].status).toBe('online');
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+});
+
 describe('useDevices persistence', () => {
   const asyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 
   beforeEach(() => {
     jest.useFakeTimers();
     jest.clearAllMocks();
+    mockDeviceWebSocketListener = undefined;
     asyncStorage.setItem.mockResolvedValue(undefined);
   });
 
@@ -214,10 +353,7 @@ describe('useDevices persistence', () => {
       resolveGetItem(null);
     });
 
-    expect(asyncStorage.setItem).toHaveBeenCalledWith(
-      'smart_devices_v1',
-      JSON.stringify([]),
-    );
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
 
     await ReactTestRenderer.act(async () => {
       renderer?.unmount();
@@ -236,6 +372,207 @@ describe('useDevices persistence', () => {
     await ReactTestRenderer.act(async () => undefined);
 
     expect(asyncStorage.setItem).not.toHaveBeenCalled();
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('does not overwrite corrupt storage when the backup write fails', async () => {
+    asyncStorage.getItem.mockResolvedValue('not-json');
+    asyncStorage.setItem.mockRejectedValueOnce(new Error('backup failed'));
+
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(React.createElement(UseDevicesProbe));
+    });
+
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(asyncStorage.setItem).toHaveBeenCalledTimes(1);
+    expect(asyncStorage.setItem).toHaveBeenCalledWith(
+      'smart_devices_v1_corrupt_backup',
+      'not-json',
+    );
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('persists only durable device fields after a device is added', async () => {
+    asyncStorage.getItem.mockResolvedValue(null);
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    asyncStorage.setItem.mockClear();
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(
+        createDevice({
+          id: 'device-persisted',
+          hardwareId: 'HW-1',
+          commandToken: 'token-1',
+          ipAddress: '192.168.0.10',
+          status: 'online',
+          controls: {
+            running: true,
+            water: true,
+            fan: true,
+          },
+          runtime: {
+            ...idleRuntime,
+            firmwareVersion: '1.0.7',
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => undefined);
+
+    const setItemCalls = asyncStorage.setItem.mock.calls;
+    const persistedPayload = JSON.parse(
+      setItemCalls[setItemCalls.length - 1]?.[1] ?? '[]',
+    );
+
+    expect(asyncStorage.setItem).toHaveBeenCalledWith(
+      'smart_devices_v1',
+      expect.any(String),
+    );
+    expect(persistedPayload).toEqual([
+      {
+        id: 'device-persisted',
+        hardwareId: 'HW-1',
+        commandToken: 'token-1',
+        ipAddress: '192.168.0.10',
+        registeredAt: 1,
+        growthStartedAt: 1,
+        name: 'Sprout Grower',
+        type: 'sprout-grower',
+        room: 'Kitchen',
+      },
+    ]);
+    expect(persistedPayload[0].status).toBeUndefined();
+    expect(persistedPayload[0].controls).toBeUndefined();
+    expect(persistedPayload[0].runtime).toBeUndefined();
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('rewrites storage when an in-flight add write is followed by deletion', async () => {
+    asyncStorage.getItem.mockResolvedValue(null);
+    let finishFirstWrite: () => void = () => undefined;
+    asyncStorage.setItem.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishFirstWrite = resolve;
+        }),
+    );
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(createDevice({id: 'transient-device'}));
+    });
+
+    expect(asyncStorage.setItem).toHaveBeenCalledWith(
+      'smart_devices_v1',
+      expect.stringContaining('transient-device'),
+    );
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.removeDevice('transient-device');
+    });
+
+    expect(asyncStorage.setItem).toHaveBeenCalledTimes(1);
+
+    await ReactTestRenderer.act(async () => {
+      finishFirstWrite();
+    });
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(asyncStorage.setItem).toHaveBeenLastCalledWith(
+      'smart_devices_v1',
+      JSON.stringify([]),
+    );
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('merges stored devices with devices added while loading was unavailable', async () => {
+    const storedDevice = createDevice({
+      id: 'stored-device',
+      hardwareId: 'HW-STORED',
+      status: 'online',
+    });
+    const sessionDevice = createDevice({
+      id: 'session-device',
+      hardwareId: 'HW-SESSION',
+      commandToken: 'session-token',
+    });
+
+    asyncStorage.getItem
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockResolvedValueOnce(JSON.stringify([storedDevice]));
+
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => undefined);
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(sessionDevice);
+    });
+
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.retryLoadDevices();
+    });
+    await ReactTestRenderer.act(async () => undefined);
+
+    const deviceIds = latestApi?.devices.map(device => device.id).sort();
+
+    expect(deviceIds).toEqual(['session-device', 'stored-device']);
+    expect(asyncStorage.setItem).toHaveBeenCalledWith(
+      'smart_devices_v1',
+      expect.stringContaining('session-device'),
+    );
 
     await ReactTestRenderer.act(async () => {
       renderer?.unmount();

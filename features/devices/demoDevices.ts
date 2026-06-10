@@ -58,9 +58,10 @@ export function createDemoProvisionedDevice(params: {
       cleanMode: false,
     },
     runtime: {
-      autoState: 'preparing',
+      autoState: 'idle',
       autoRunning: true,
-      autoNextRunInMs: 20 * 60 * 1000,
+      // 2시간 주기 중 절반쯤 지난 시점으로 보여 게이지가 중간까지 차 있게 한다.
+      autoNextRunInMs: 55 * 60 * 1000,
       interlockOk: true,
       fanRunLeftMs: 90 * 1000,
       firmwareVersion: '1.0.3',

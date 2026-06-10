@@ -73,6 +73,7 @@ describe('deviceWebSocket', () => {
   });
 
   afterEach(() => {
+    jest.useRealTimers();
     Object.defineProperty(globalThis, 'WebSocket', {
       configurable: true,
       writable: true,
@@ -114,5 +115,66 @@ describe('deviceWebSocket', () => {
         value: true,
       }),
     ]);
+  });
+
+  it('uses recent websocket contact instead of stale runtime lastSeenAt before sending a command', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(20_000);
+    const {ensureDeviceWebSocket, sendWebSocketDeviceCommand} =
+      require('../deviceWebSocket') as typeof import('../deviceWebSocket');
+
+    const socket = ensureDeviceWebSocket() as unknown as MockDeviceWebSocket;
+    socket.open();
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: {
+          sta_connected: true,
+        },
+      }),
+    });
+
+    const commandPromise = sendWebSocketDeviceCommand({
+      device: createDevice({
+        hardwareId: 'HW-1',
+        commandToken: 'command-token-1',
+        runtime: {
+          autoState: 'idle',
+          autoRunning: true,
+          autoNextRunInMs: 100_000,
+          interlockOk: true,
+          fanRunLeftMs: 0,
+          lastSeenAt: 1_000,
+        },
+      }),
+      command: 'water',
+      value: true,
+    });
+
+    await Promise.resolve();
+
+    expect(createdSockets).toHaveLength(1);
+    expect(socket.sentMessages).toContain(
+      JSON.stringify({
+        type: 'command',
+        deviceId: 'HW-1',
+        command: 'water',
+        token: 'command-token-1',
+        value: true,
+      }),
+    );
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: {
+          sta_connected: true,
+        },
+      }),
+    });
+
+    await commandPromise;
   });
 });

@@ -1,6 +1,7 @@
 import {Device, DeviceCommand} from './types';
 
 export const DEVICE_WS_URL = 'wss://mqtt.app2-server.kr/ws';
+const DEVICE_CONTACT_STALE_MS = 15000;
 
 export type DeviceWsState = {
   system_enabled?: boolean;
@@ -51,8 +52,41 @@ const commandWaiters = new Map<
     reject: (error: Error) => void;
   }>
 >();
+const deviceLastContactAtById = new Map<string, number>();
+
+function rememberDeviceContact(message: DeviceWsMessage, now = Date.now()) {
+  if (message.type === 'hello_ok') {
+    message.devices?.forEach(deviceId => {
+      deviceLastContactAtById.set(deviceId, now);
+    });
+    return;
+  }
+
+  if (message.type === 'state' || message.type === 'device_online') {
+    deviceLastContactAtById.set(message.deviceId, now);
+    return;
+  }
+
+  if (message.type === 'device_offline') {
+    deviceLastContactAtById.delete(message.deviceId);
+  }
+}
+
+function getLastDeviceContactAt(device: Device) {
+  const deviceId = device.hardwareId ?? device.id;
+  const socketContactAt = deviceLastContactAtById.get(deviceId);
+  const runtimeContactAt = device.runtime?.lastSeenAt;
+
+  if (socketContactAt && runtimeContactAt) {
+    return Math.max(socketContactAt, runtimeContactAt);
+  }
+
+  return socketContactAt ?? runtimeContactAt;
+}
 
 function emit(message: DeviceWsMessage) {
+  rememberDeviceContact(message);
+
   if (message.type === 'state') {
     const waiters = commandWaiters.get(message.deviceId);
 
@@ -302,10 +336,10 @@ export async function sendWebSocketDeviceCommand(params: {
   value: boolean;
 }) {
   const deviceId = params.device.hardwareId ?? params.device.id;
-  const lastSeenAt = params.device.runtime?.lastSeenAt;
+  const lastSeenAt = getLastDeviceContactAt(params.device);
   const shouldRefreshSocket =
     Boolean(params.device.hardwareId) &&
-    (!lastSeenAt || Date.now() - lastSeenAt > 15000);
+    (!lastSeenAt || Date.now() - lastSeenAt > DEVICE_CONTACT_STALE_MS);
   const currentSocket = shouldRefreshSocket
     ? reconnectDeviceWebSocket()
     : ensureDeviceWebSocket();

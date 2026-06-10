@@ -24,7 +24,6 @@ const AIR_FLOW_PHASE_PER_MS = 0.0028;
 
 function AirFlowEffect({active, style}: AirFlowEffectProps) {
   const [size, setSize] = useState<EffectSize>({height: 0, width: 0});
-  const clock = useClock();
 
   return (
     <View
@@ -39,37 +38,79 @@ function AirFlowEffect({active, style}: AirFlowEffectProps) {
         );
       }}>
       {size.width > 0 && size.height > 0 && (
-        <Canvas style={StyleSheet.absoluteFill}>
-          {Array.from({length: LINE_COUNT}, (_, index) => (
-            <AirFlowLine
-              active={active}
-              clock={clock}
-              index={index}
-              key={index}
-              size={size}
-            />
-          ))}
-        </Canvas>
+        active ? (
+          <AnimatedAirFlowCanvas size={size} />
+        ) : (
+          <StaticAirFlowCanvas size={size} />
+        )
       )}
     </View>
   );
 }
 
-function AirFlowLine({
-  active,
+function AnimatedAirFlowCanvas({size}: {size: EffectSize}) {
+  const clock = useClock();
+
+  return (
+    <Canvas style={StyleSheet.absoluteFill}>
+      {Array.from({length: LINE_COUNT}, (_, index) => (
+        <AnimatedAirFlowLine
+          clock={clock}
+          index={index}
+          key={index}
+          size={size}
+        />
+      ))}
+    </Canvas>
+  );
+}
+
+function StaticAirFlowCanvas({size}: {size: EffectSize}) {
+  return (
+    <Canvas style={StyleSheet.absoluteFill}>
+      {Array.from({length: LINE_COUNT}, (_, index) => (
+        <AirFlowPath
+          active={false}
+          index={index}
+          key={index}
+          path={createAirFlowPath(size, 0, index, false)}
+          size={size}
+        />
+      ))}
+    </Canvas>
+  );
+}
+
+function AnimatedAirFlowLine({
   clock,
   index,
   size,
 }: {
-  active: boolean;
   clock: {value: number};
   index: number;
   size: EffectSize;
 }) {
   const path = useDerivedValue(() => {
-    const phase = active ? clock.value * AIR_FLOW_PHASE_PER_MS : 0;
-    return createAirFlowPath(size, phase, index, active);
-  }, [active, clock, index, size.height, size.width]);
+    const phase = clock.value * AIR_FLOW_PHASE_PER_MS;
+    return createAirFlowPath(size, phase, index, true);
+  }, [clock, index, size.height, size.width]);
+
+  return (
+    <AirFlowPath active={true} index={index} path={path} size={size} />
+  );
+}
+
+function AirFlowPath({
+  active,
+  index,
+  path,
+  size,
+}: {
+  active: boolean;
+  index: number;
+  path: string | {value: string};
+  size: EffectSize;
+}) {
   const opacity = active
     ? 0.26 + (index / LINE_COUNT) * 0.56
     : 0.14 + (index / LINE_COUNT) * 0.28;

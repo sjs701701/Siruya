@@ -20,6 +20,15 @@ server-side ownership enforcement cannot be completed from this repo alone.
   update.
 - MQTT command support is kept for development compatibility, but `PUMP=ON`
   and `FAN=ON` now use the same 60-second manual timeout policy as app commands.
+- The app now shows firmware updates only when the manifest version is
+  numerically newer than the device version and the manifest includes a valid
+  32-character MD5 checksum.
+- Device persistence now stores durable device identity fields separately from
+  volatile runtime state, so stale online/offline or fan/water values are not
+  restored as if they were current.
+- Device liveness tracking is separated from the watering countdown anchor.
+  This prevents a healthy WebSocket device from flickering offline while the
+  two-hour watering countdown anchor is intentionally preserved.
 
 ## Cloud server requirements
 
@@ -51,7 +60,8 @@ hardening step and should be added before production release.
 ## Deployment status
 
 - USB test device: `1.0.7` installed.
-- Public firmware manifest server: still advertises `1.0.6`.
+- Public firmware manifest server: still advertises `1.0.6` and has no `md5`
+  field as of 2026-06-10.
 - Public OTA rollout: not started.
 
 The server files prepared for rollout are:
@@ -73,6 +83,13 @@ the exposed credential does not secure the system.
 
 ## Deferred release-quality work
 
+- Firmware `1.0.8` should close the provisioning gaps before broader testing:
+  shut down the open setup AP after successful provisioning, require tokens for
+  `/wifi/set` and `/wifi/clear`, remove side-effecting GET endpoints, remove
+  wildcard CORS, and accept OTA only when the server version is newer.
+- The reset gesture UX must be decided before implementing the firmware
+  provisioning window. Example decision needed: which physical touch duration
+  reopens setup mode and what LED feedback confirms it.
 - Add signed OTA manifests and firmware signature verification.
 - Add a real cloud account/session model for ownership.
 - Add full accessibility labels and localization after final copy is approved.
