@@ -316,6 +316,156 @@ describe('useDevices device contact freshness', () => {
       renderer?.unmount();
     });
   });
+
+  it('ignores malformed websocket state frames without replacing devices', async () => {
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(
+        createDevice({
+          id: 'cloud-device',
+          hardwareId: 'HW-1',
+          status: 'online',
+        }),
+      );
+    });
+
+    const previousDevices = latestApi?.devices;
+
+    expect(() => {
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+      });
+    }).not.toThrow();
+
+    expect(latestApi?.devices).toBe(previousDevices);
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('keeps the same device array for equivalent websocket state snapshots', async () => {
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(
+        createDevice({
+          id: 'cloud-device',
+          hardwareId: 'HW-1',
+          status: 'offline',
+        }),
+      );
+    });
+
+    const state = {
+      sta_connected: true,
+      system_enabled: true,
+      interlock_ok: true,
+      pump_on: false,
+      fan_on: false,
+      auto_state: 0,
+      auto_next_run_in_ms: 60_000,
+    };
+
+    await ReactTestRenderer.act(async () => {
+      jest.setSystemTime(1_000);
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+        state,
+      });
+    });
+
+    const previousDevices = latestApi?.devices;
+
+    await ReactTestRenderer.act(async () => {
+      jest.setSystemTime(1_000);
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+        state,
+      });
+    });
+
+    expect(latestApi?.devices).toBe(previousDevices);
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('normalizes invalid websocket numeric fields instead of storing NaN', async () => {
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(
+        createDevice({
+          id: 'cloud-device',
+          hardwareId: 'HW-1',
+          status: 'offline',
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: {
+          sta_connected: true,
+          auto_state: 'invalid',
+          auto_next_run_in_ms: 'invalid',
+          fan_run_left_ms: 'invalid',
+          update_progress: 'invalid',
+        },
+      });
+    });
+
+    const runtime = latestApi?.devices[0].runtime;
+
+    expect(Number.isNaN(runtime?.autoNextRunInMs)).toBe(false);
+    expect(Number.isNaN(runtime?.fanRunLeftMs)).toBe(false);
+    expect(Number.isNaN(runtime?.firmwareUpdateProgress)).toBe(false);
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
 });
 
 describe('useDevices persistence', () => {
@@ -472,6 +622,116 @@ describe('useDevices persistence', () => {
     });
   });
 
+  it('does not persist demo devices', async () => {
+    asyncStorage.getItem.mockResolvedValue(null);
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    asyncStorage.setItem.mockClear();
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(
+        createDevice({
+          id: 'demo-device',
+          isDemo: true,
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(asyncStorage.setItem).not.toHaveBeenCalled();
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('skips previously stored demo devices on load', async () => {
+    asyncStorage.getItem.mockResolvedValue(
+      JSON.stringify([
+        createDevice({
+          id: 'stored-demo',
+          isDemo: true,
+        }),
+      ]),
+    );
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(latestApi?.devices).toEqual([]);
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('recovers valid stored devices while backing up corrupt stored items', async () => {
+    const storedValue = JSON.stringify([
+      createDevice({
+        id: 'stored-device',
+        hardwareId: 'HW-STORED',
+      }),
+      {id: 'corrupt-device'},
+    ]);
+    asyncStorage.getItem.mockResolvedValue(storedValue);
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(latestApi?.devices.map(device => device.id)).toEqual([
+      'stored-device',
+    ]);
+    expect(latestApi?.loadState).toEqual({
+      status: 'loaded',
+      warning: 'DEVICE_STORAGE_RECOVERED_WITH_BACKUP',
+    });
+    expect(asyncStorage.setItem).toHaveBeenCalledWith(
+      'smart_devices_v1_corrupt_backup',
+      storedValue,
+    );
+    expect(asyncStorage.setItem).toHaveBeenCalledWith(
+      'smart_devices_v1',
+      expect.not.stringContaining('corrupt-device'),
+    );
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
   it('rewrites storage when an in-flight add write is followed by deletion', async () => {
     asyncStorage.getItem.mockResolvedValue(null);
     let finishFirstWrite: () => void = () => undefined;
@@ -573,6 +833,59 @@ describe('useDevices persistence', () => {
       'smart_devices_v1',
       expect.stringContaining('session-device'),
     );
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('preserves stored identity fields when a session device has undefined values', async () => {
+    const storedDevice = createDevice({
+      id: 'same-device',
+      hardwareId: 'HW-STORED',
+      commandToken: 'stored-token',
+      ipAddress: '192.168.0.10',
+    });
+    const sessionDevice = createDevice({
+      id: 'same-device',
+      hardwareId: undefined,
+      commandToken: undefined,
+      ipAddress: undefined,
+    });
+
+    asyncStorage.getItem
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockResolvedValueOnce(JSON.stringify([storedDevice]));
+
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => undefined);
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(sessionDevice);
+    });
+    await ReactTestRenderer.act(async () => {
+      latestApi?.retryLoadDevices();
+    });
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(latestApi?.devices[0]).toMatchObject({
+      id: 'same-device',
+      hardwareId: 'HW-STORED',
+      commandToken: 'stored-token',
+      ipAddress: '192.168.0.10',
+    });
 
     await ReactTestRenderer.act(async () => {
       renderer?.unmount();

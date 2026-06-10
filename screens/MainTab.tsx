@@ -55,10 +55,51 @@ function MainTab() {
     updateDevice,
     removeDevice,
     setSelectedDevice,
+    loadState,
+    persistState,
+    retryLoadDevices,
+    retryPersistDevices,
   } = useDevices();
 
   const carouselWidth = Math.max(screenWidth - 54, 280);
   const activeDevice = devices[activeDeviceIndex];
+  const storageNotice = useMemo(() => {
+    if (loadState.status === 'error') {
+      return {
+        title:
+          loadState.error === 'DEVICE_STORAGE_BACKUP_FAILED'
+            ? '저장 데이터 보호가 필요합니다'
+            : '기기 목록을 불러오지 못했습니다',
+        message:
+          loadState.error === 'DEVICE_STORAGE_BACKUP_FAILED'
+            ? '기존 정보 보호를 위해 새 저장을 잠시 멈췄습니다.'
+            : '이 세션에 추가한 기기는 저장되지 않을 수 있습니다.',
+        actionLabel: '재시도',
+        onPress: retryLoadDevices,
+      };
+    }
+
+    if (persistState.status === 'error') {
+      return {
+        title: '기기 정보 저장에 실패했습니다',
+        message: '변경한 내용이 재시작 후 사라질 수 있습니다.',
+        actionLabel: '재시도',
+        onPress: retryPersistDevices,
+      };
+    }
+
+    if (
+      loadState.status === 'loaded' &&
+      loadState.warning === 'DEVICE_STORAGE_RECOVERED_WITH_BACKUP'
+    ) {
+      return {
+        title: '일부 저장 정보를 복구했습니다',
+        message: '정상 기기만 불러오고 손상된 정보는 백업했습니다.',
+      };
+    }
+
+    return null;
+  }, [loadState, persistState, retryLoadDevices, retryPersistDevices]);
 
   useEffect(() => {
     if (devices.length === 0) {
@@ -120,6 +161,29 @@ function MainTab() {
           </DeviceActionButton>
         </View>
       </View>
+
+      {storageNotice && (
+        <View style={styles.storageNotice}>
+          <View style={styles.storageNoticeCopy}>
+            <Text style={styles.storageNoticeTitle}>
+              {storageNotice.title}
+            </Text>
+            <Text style={styles.storageNoticeMessage}>
+              {storageNotice.message}
+            </Text>
+          </View>
+          {'onPress' in storageNotice && (
+            <HapticPressable
+              accessibilityLabel={storageNotice.actionLabel}
+              onPress={storageNotice.onPress}
+              style={styles.storageNoticeButton}>
+              <Text style={styles.storageNoticeButtonText}>
+                {storageNotice.actionLabel}
+              </Text>
+            </HapticPressable>
+          )}
+        </View>
+      )}
 
       <ScrollView
         style={styles.content}
@@ -453,6 +517,46 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     flexDirection: 'row',
+  },
+  storageNotice: {
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    marginHorizontal: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  storageNoticeCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  storageNoticeTitle: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  storageNoticeMessage: {
+    color: '#6b7280',
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 15,
+  },
+  storageNoticeButton: {
+    alignItems: 'center',
+    backgroundColor: '#2f2f2f',
+    borderRadius: 9,
+    minWidth: 58,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  storageNoticeButtonText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '900',
   },
   notificationButton: {
     borderRadius: 23,

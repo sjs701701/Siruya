@@ -54,6 +54,66 @@ const commandWaiters = new Map<
 >();
 const deviceLastContactAtById = new Map<string, number>();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseDeviceWsMessage(value: unknown): DeviceWsMessage | null {
+  if (!isRecord(value) || typeof value.type !== 'string') {
+    return null;
+  }
+
+  if (value.type === 'hello_ok') {
+    if (
+      value.devices !== undefined &&
+      (!Array.isArray(value.devices) ||
+        !value.devices.every(deviceId => typeof deviceId === 'string'))
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'hello_ok',
+      devices: value.devices,
+    };
+  }
+
+  if (
+    value.type === 'device_online' ||
+    value.type === 'device_offline'
+  ) {
+    return typeof value.deviceId === 'string'
+      ? {
+          type: value.type,
+          deviceId: value.deviceId,
+        }
+      : null;
+  }
+
+  if (value.type === 'state') {
+    return typeof value.deviceId === 'string' && isRecord(value.state)
+      ? {
+          type: 'state',
+          deviceId: value.deviceId,
+          state: value.state,
+        }
+      : null;
+  }
+
+  if (value.type === 'command_error') {
+    return typeof value.deviceId === 'string'
+      ? {
+          type: 'command_error',
+          deviceId: value.deviceId,
+          message:
+            typeof value.message === 'string' ? value.message : undefined,
+        }
+      : null;
+  }
+
+  return null;
+}
+
 function rememberDeviceContact(message: DeviceWsMessage, now = Date.now()) {
   if (message.type === 'hello_ok') {
     message.devices?.forEach(deviceId => {
@@ -278,7 +338,11 @@ export function ensureDeviceWebSocket() {
 
   nextSocket.onmessage = event => {
     try {
-      emit(JSON.parse(String(event.data)) as DeviceWsMessage);
+      const message = parseDeviceWsMessage(JSON.parse(String(event.data)));
+
+      if (message) {
+        emit(message);
+      }
     } catch {
       // Ignore malformed server messages.
     }

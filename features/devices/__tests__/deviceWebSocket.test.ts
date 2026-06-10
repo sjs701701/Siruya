@@ -177,4 +177,31 @@ describe('deviceWebSocket', () => {
 
     await commandPromise;
   });
+
+  it('ignores malformed server messages before notifying subscribers', () => {
+    const {ensureDeviceWebSocket, subscribeDeviceWebSocket} =
+      require('../deviceWebSocket') as typeof import('../deviceWebSocket');
+    const listener = jest.fn();
+
+    subscribeDeviceWebSocket(listener);
+    const socket = ensureDeviceWebSocket() as unknown as MockDeviceWebSocket;
+    socket.open();
+
+    socket.onmessage?.({data: JSON.stringify({type: 'state'})});
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: null,
+      }),
+    });
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'hello_ok',
+        devices: [null],
+      }),
+    });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
 });

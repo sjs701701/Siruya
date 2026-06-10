@@ -103,10 +103,3 @@ export function hasFirmwareManifestUpdate(
     isNewerFirmwareVersion(manifest?.version, currentVersion)
   );
 }
-
-export function hasDifferentFirmwareVersion(
-  currentVersion?: string,
-  latestVersion?: string,
-) {
-  return isNewerFirmwareVersion(latestVersion, currentVersion);
-}

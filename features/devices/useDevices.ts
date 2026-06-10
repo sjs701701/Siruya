@@ -11,7 +11,7 @@ import {getProductDefinition} from './deviceRegistry';
 import {
   fetchFirmwareManifest,
   hasFirmwareManifestUpdate,
-  hasDifferentFirmwareVersion,
+  isNewerFirmwareVersion,
   hasUsableFirmwareManifest,
 } from './firmwareManifest';
 import {
@@ -30,7 +30,10 @@ const DEVICE_STATE_ANCHOR_TOLERANCE_MS = 2000;
 
 type DeviceLoadState =
   | {status: 'loading'}
-  | {status: 'loaded'}
+  | {
+      status: 'loaded';
+      warning?: 'DEVICE_STORAGE_RECOVERED_WITH_BACKUP';
+    }
   | {
       status: 'error';
       error: 'DEVICE_STORAGE_READ_FAILED' | 'DEVICE_STORAGE_BACKUP_FAILED';
@@ -77,6 +80,11 @@ function isOptionalString(value: unknown): value is string | undefined {
 
 function readOptionalTimestamp(value: unknown) {
   return isFiniteNumber(value) && value > 0 ? value : undefined;
+}
+
+function readFiniteNumber(value: unknown, fallback = 0) {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
 }
 
 function createDefaultControls(): Device['controls'] {
@@ -162,9 +170,13 @@ function getDefaultStatusForStoredDevice(device: Pick<Device, 'isDemo'>) {
   return device.isDemo ? 'online' : ('offline' as const);
 }
 
-function parseStoredDevice(value: unknown, now: number): Device {
+function parseStoredDevice(value: unknown, now: number): Device | null {
   if (!isRecord(value)) {
     throw new Error('DEVICE_STORAGE_INVALID_ITEM');
+  }
+
+  if (value.isDemo === true) {
+    return null;
   }
 
   if (
@@ -212,7 +224,22 @@ function parseStoredDevices(value: string, now = Date.now()) {
     throw new Error('DEVICE_STORAGE_INVALID_ROOT');
   }
 
-  return parsed.map(device => parseStoredDevice(device, now));
+  const devices: Device[] = [];
+  let hasCorruptItems = false;
+
+  parsed.forEach(device => {
+    try {
+      const parsedDevice = parseStoredDevice(device, now);
+
+      if (parsedDevice) {
+        devices.push(parsedDevice);
+      }
+    } catch {
+      hasCorruptItems = true;
+    }
+  });
+
+  return {devices, hasCorruptItems};
 }
 
 function toStoredDevice(device: Device): StoredDevice {
@@ -231,7 +258,19 @@ function toStoredDevice(device: Device): StoredDevice {
 }
 
 function serializeDevicesForStorage(devices: Device[]) {
-  return JSON.stringify(devices.map(toStoredDevice));
+  return JSON.stringify(
+    devices.filter(device => !device.isDemo).map(toStoredDevice),
+  );
+}
+
+function mergeLoadedDevice(loadedDevice: Device, currentDevice: Device): Device {
+  return {
+    ...loadedDevice,
+    ...currentDevice,
+    hardwareId: currentDevice.hardwareId ?? loadedDevice.hardwareId,
+    commandToken: currentDevice.commandToken ?? loadedDevice.commandToken,
+    ipAddress: currentDevice.ipAddress ?? loadedDevice.ipAddress,
+  };
 }
 
 function mergeLoadedDevices(currentDevices: Device[], loadedDevices: Device[]) {
@@ -253,13 +292,17 @@ function mergeLoadedDevices(currentDevices: Device[], loadedDevices: Device[]) {
       return;
     }
 
-    nextDevices[duplicateIndex] = {
-      ...nextDevices[duplicateIndex],
-      ...currentDevice,
-    };
+    nextDevices[duplicateIndex] = mergeLoadedDevice(
+      nextDevices[duplicateIndex],
+      currentDevice,
+    );
   });
 
   return nextDevices;
+}
+
+async function backupCorruptStorageValue(value: string) {
+  await AsyncStorage.setItem(CORRUPT_STORAGE_BACKUP_KEY, value);
 }
 
 async function readStorageValueWithRetry(key: string) {
@@ -382,9 +425,9 @@ function applyStatusSnapshot(
     snapshot.firmwareVersion ?? device.runtime?.firmwareVersion;
   const latestFirmwareVersion =
     snapshot.latestFirmwareVersion ?? device.runtime?.latestFirmwareVersion;
-  const manifestUpdateAvailable = hasDifferentFirmwareVersion(
-    firmwareVersion,
+  const manifestUpdateAvailable = isNewerFirmwareVersion(
     latestFirmwareVersion,
+    firmwareVersion,
   );
   const snapshotFirmwareStatus =
     snapshot.firmwareUpdateStatus === 'available' && !firmwareVersion
@@ -396,6 +439,10 @@ function applyStatusSnapshot(
     snapshotFirmwareStatus !== 'updated' &&
     snapshotFirmwareStatus !== 'failed' &&
     manifestUpdateAvailable;
+  const snapshotFirmwareUpdateProgress =
+    snapshot.firmwareUpdateProgress === undefined
+      ? undefined
+      : readFiniteNumber(snapshot.firmwareUpdateProgress);
   const firmwareUpdateStatus =
     shouldKeepLocalUpdating
       ? 'updating'
@@ -409,9 +456,9 @@ function applyStatusSnapshot(
   const firmwareUpdateProgress = shouldKeepLocalUpdating
     ? Math.max(
         device.runtime?.firmwareUpdateProgress ?? 0,
-        snapshot.firmwareUpdateProgress ?? 0,
+        snapshotFirmwareUpdateProgress ?? 0,
       )
-    : snapshot.firmwareUpdateProgress;
+    : snapshotFirmwareUpdateProgress;
   const status = snapshot.online ? 'online' : 'offline';
   const controls = mergeDeviceControls(device.controls, {
     running: snapshot.running,
@@ -421,9 +468,9 @@ function applyStatusSnapshot(
   const runtime = stabilizeRuntimeAnchor(device.runtime, {
     autoState: snapshot.autoState,
     autoRunning: snapshot.autoRunning,
-    autoNextRunInMs: snapshot.autoNextRunInMs,
+    autoNextRunInMs: readFiniteNumber(snapshot.autoNextRunInMs),
     interlockOk: snapshot.interlockOk,
-    fanRunLeftMs: snapshot.fanRunLeftMs,
+    fanRunLeftMs: readFiniteNumber(snapshot.fanRunLeftMs),
     firmwareVersion,
     latestFirmwareVersion,
     firmwareUpdateStatus,
@@ -450,15 +497,19 @@ function applyStatusSnapshot(
 }
 
 function snapshotFromWsState(state: DeviceWsState): DeviceStatusSnapshot {
-  const autoState = autoStateFromDeviceCode(state.auto_state);
+  const autoState = autoStateFromDeviceCode(
+    readFiniteNumber(state.auto_state),
+  );
   const autoRunning =
     Boolean(state.pump_req_auto) ||
     autoState === 'preparing' ||
     autoState === 'watering';
 
   const firmwareUpdateStatus = normalizeFirmwareStatus(
-    state.update_status,
-    state.update_available,
+    typeof state.update_status === 'string' ? state.update_status : undefined,
+    typeof state.update_available === 'boolean'
+      ? state.update_available
+      : undefined,
   );
 
   return {
@@ -468,14 +519,48 @@ function snapshotFromWsState(state: DeviceWsState): DeviceStatusSnapshot {
     fan: Boolean(state.fan_on),
     autoState,
     autoRunning,
-    autoNextRunInMs: Number(state.auto_next_run_in_ms ?? 0),
+    autoNextRunInMs: readFiniteNumber(state.auto_next_run_in_ms),
     interlockOk: Boolean(state.interlock_ok),
-    fanRunLeftMs: Number(state.fan_run_left_ms ?? 0),
-    firmwareVersion: state.firmware_version,
-    latestFirmwareVersion: state.latest_firmware_version,
+    fanRunLeftMs: readFiniteNumber(state.fan_run_left_ms),
+    firmwareVersion:
+      typeof state.firmware_version === 'string'
+        ? state.firmware_version
+        : undefined,
+    latestFirmwareVersion:
+      typeof state.latest_firmware_version === 'string'
+        ? state.latest_firmware_version
+        : undefined,
     firmwareUpdateStatus,
-    firmwareUpdateProgress: Number(state.update_progress ?? 0),
+    firmwareUpdateProgress: readFiniteNumber(state.update_progress),
   };
+}
+
+function hasValidDeviceMessageShape(message: {
+  type?: unknown;
+  deviceId?: unknown;
+  devices?: unknown;
+  state?: unknown;
+}) {
+  if (message.type === 'hello_ok') {
+    return (
+      message.devices === undefined ||
+      (Array.isArray(message.devices) &&
+        message.devices.every(deviceId => typeof deviceId === 'string'))
+    );
+  }
+
+  if (
+    message.type === 'device_online' ||
+    message.type === 'device_offline'
+  ) {
+    return typeof message.deviceId === 'string';
+  }
+
+  if (message.type === 'state') {
+    return typeof message.deviceId === 'string' && isRecord(message.state);
+  }
+
+  return false;
 }
 
 export function mergePolledDeviceStatuses(
@@ -617,16 +702,34 @@ export function useDevices() {
 
       try {
         const now = Date.now();
-        const loadedDevices = parseStoredDevices(value, now);
+        const {devices: loadedDevices, hasCorruptItems} = parseStoredDevices(
+          value,
+          now,
+        );
+
+        if (hasCorruptItems) {
+          await backupCorruptStorageValue(value);
+        }
+
         lastPersistedValueRef.current = value;
         setDevices(currentDevices =>
           mergeLoadedDevices(currentDevices, loadedDevices),
         );
+
+        if (hasCorruptItems) {
+          canPersistDevicesRef.current = true;
+          setLoadState({
+            status: 'loaded',
+            warning: 'DEVICE_STORAGE_RECOVERED_WITH_BACKUP',
+          });
+          setHasLoadedDevices(true);
+          return;
+        }
       } catch {
         let backupSucceeded = false;
 
         try {
-          await AsyncStorage.setItem(CORRUPT_STORAGE_BACKUP_KEY, value);
+          await backupCorruptStorageValue(value);
           backupSucceeded = true;
         } catch {
           if (!cancelled) {
@@ -651,6 +754,13 @@ export function useDevices() {
         }
 
         lastPersistedValueRef.current = value;
+        canPersistDevicesRef.current = true;
+        setLoadState({
+          status: 'loaded',
+          warning: 'DEVICE_STORAGE_RECOVERED_WITH_BACKUP',
+        });
+        setHasLoadedDevices(true);
+        return;
       }
 
       canPersistDevicesRef.current = true;
@@ -921,6 +1031,10 @@ export function useDevices() {
         return;
       }
 
+      if (!hasValidDeviceMessageShape(message)) {
+        return;
+      }
+
       setDevices(currentDevices => {
         if (message.type === 'hello_ok') {
           const now = Date.now();
@@ -930,10 +1044,9 @@ export function useDevices() {
           return currentDevices;
         }
 
-        if (
-          message.type === 'state' ||
-          message.type === 'device_online'
-        ) {
+        const now = Date.now();
+
+        if (message.type === 'state' || message.type === 'device_online') {
           lastDeviceContactAtRef.current.set(message.deviceId, Date.now());
         }
 
@@ -941,35 +1054,50 @@ export function useDevices() {
           lastDeviceContactAtRef.current.delete(message.deviceId);
         }
 
+        let changed = false;
         const nextDevices = currentDevices.map(device => {
           if (device.hardwareId !== message.deviceId) {
             return device;
           }
 
+          let nextDevice: Device;
+
           if (message.type === 'state') {
-            return applyStatusSnapshot(
+            nextDevice = applyStatusSnapshot(
               device,
               snapshotFromWsState(message.state),
+              now,
             );
+          } else if (message.type === 'device_online') {
+            nextDevice =
+              device.status === 'online'
+                ? device
+                : {
+                    ...device,
+                    status: 'online' as const,
+                    runtime: {
+                      ...(device.runtime ?? createEmptyRuntime()),
+                      lastSeenAt: now,
+                    },
+                  };
+          } else {
+            nextDevice =
+              device.status === 'offline'
+                ? device
+                : {
+                    ...device,
+                    status: 'offline' as const,
+                  };
           }
 
-          return {
-            ...device,
-            status:
-              message.type === 'device_online'
-                ? ('online' as const)
-                : ('offline' as const),
-            runtime:
-              message.type === 'device_online'
-                ? {
-                    ...(device.runtime ?? createEmptyRuntime()),
-                    lastSeenAt: Date.now(),
-                  }
-                : device.runtime,
-          };
+          if (nextDevice !== device) {
+            changed = true;
+          }
+
+          return nextDevice;
         });
 
-        return nextDevices;
+        return changed ? nextDevices : currentDevices;
       });
     });
   }, []);

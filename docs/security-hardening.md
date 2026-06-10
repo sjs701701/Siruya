@@ -29,6 +29,12 @@ server-side ownership enforcement cannot be completed from this repo alone.
 - Device liveness tracking is separated from the watering countdown anchor.
   This prevents a healthy WebSocket device from flickering offline while the
   two-hour watering countdown anchor is intentionally preserved.
+- The app validates cloud WebSocket messages before applying them, so malformed
+  `state` frames are ignored instead of crashing the render path.
+- Corrupt stored device entries are backed up and skipped while valid stored
+  devices continue to load. Demo devices are excluded from persistence.
+- Storage load and persist failures now surface through the home screen with a
+  retry action instead of silently disabling persistence for the session.
 
 ## Cloud server requirements
 
