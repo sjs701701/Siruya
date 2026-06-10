@@ -2,6 +2,7 @@ export type FirmwareManifest = {
   product?: string;
   version?: string;
   url?: string;
+  md5?: string;
   required?: boolean;
   notes?: string;
 };

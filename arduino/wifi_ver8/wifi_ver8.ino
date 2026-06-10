@@ -13,7 +13,7 @@
 #include <math.h>
 #include "secrets.h"
 
-#define FIRMWARE_VERSION "1.0.6"
+#define FIRMWARE_VERSION "1.0.7"
 #define FIRMWARE_MANIFEST_URL "https://mqtt.app2-server.kr/firmware/sprout-grower/latest.json"
 
 
@@ -96,6 +96,7 @@ bool resetCleared = false;
 // =======================================================
 String deviceId;
 String apSsid;
+String commandToken;
 
 WiFiClientSecure net;
 PubSubClient mqtt(net);
@@ -125,6 +126,10 @@ void startWebSocket();
 void sendWsState();
 void onWsEvent(WStype_t type, uint8_t* payload, size_t length);
 bool applyAppCommand(String command, bool value);
+void publishPumpRequestState(bool on);
+void publishFanRequestState(bool on);
+String createCommandToken();
+bool isAuthorizedCommandToken(const String& token);
 void factoryResetWifi();
 bool connectStaBlocking(const String& ssid, const String& pass);
 void scheduleNextAutoRunFromNow(const char* reason);
@@ -584,6 +589,7 @@ void updateManualTimeouts() {
     manualPumpUntil = 0;
     pumpReqApp = false;
     Serial.println("[MANUAL] pump timeout -> OFF");
+    publishPumpRequestState(false);
     scheduleNextAutoRunFromNow("manual pump timeout");
     sendWsState();
   }
@@ -593,6 +599,7 @@ void updateManualTimeouts() {
     fanManualOverride = false;
     setFan(false);
     Serial.println("[MANUAL] fan timeout -> OFF");
+    publishFanRequestState(false);
     scheduleNextAutoRunFromNow("manual fan timeout");
     sendWsState();
   }
@@ -898,6 +905,12 @@ void clearWifiPrefs() {
   prefs.begin("wifi", false);
   prefs.clear();
   prefs.end();
+
+  prefs.begin("security", false);
+  prefs.clear();
+  prefs.end();
+  commandToken = "";
+
   Serial.println("[WIFI] cleared saved ssid/pass");
 }
 
@@ -966,6 +979,22 @@ void sendJson(int code, const String& body) {
   server.send(code, "application/json; charset=utf-8", body);
 }
 
+String createCommandToken() {
+  String token = "";
+
+  for (int i = 0; i < 4; i++) {
+    char chunk[9];
+    snprintf(chunk, sizeof(chunk), "%08x", (uint32_t)esp_random());
+    token += chunk;
+  }
+
+  return token;
+}
+
+bool isAuthorizedCommandToken(const String& token) {
+  return commandToken.length() == 0 || token == commandToken;
+}
+
 void handleProvision() {
   if (server.method() == HTTP_OPTIONS) {
     sendJson(204, "{}");
@@ -994,12 +1023,18 @@ void handleProvision() {
   prefs.putString("pass", password);
   prefs.end();
 
+  commandToken = createCommandToken();
+  prefs.begin("security", false);
+  prefs.putString("command_token", commandToken);
+  prefs.end();
+
   WiFi.setAutoReconnect(true);
   bool ok = connectStaBlocking(ssid, password);
 
   String json = "{";
   json += "\"ok\":" + String(ok ? "true" : "false") + ",";
   json += "\"device_id\":\"" + deviceId + "\",";
+  json += "\"command_token\":\"" + commandToken + "\",";
   json += "\"ap_ssid\":\"" + apSsid + "\",";
   json += "\"sta_status\":\"" + wifiStatusToStr(WiFi.status()) + "\",";
   json += "\"ip\":\"" + WiFi.localIP().toString() + "\"";
@@ -1025,7 +1060,13 @@ void handleAppCommand() {
   }
 
   String command = doc["command"] | "";
+  String token = doc["token"] | "";
   bool value = doc["value"] | false;
+
+  if (!isAuthorizedCommandToken(token)) {
+    sendJson(403, "{\"ok\":false,\"message\":\"unauthorized command\"}");
+    return;
+  }
 
   if (!applyAppCommand(command, value)) {
     sendJson(400, "{\"ok\":false,\"message\":\"unknown command\"}");
@@ -1175,6 +1216,14 @@ void publishState(const String& s) {
   mqtt.publish(topicState.c_str(), s.c_str(), true);
 }
 
+void publishPumpRequestState(bool on) {
+  publishState(on ? "PUMP_REQ_APP=ON" : "PUMP_REQ_APP=OFF");
+}
+
+void publishFanRequestState(bool on) {
+  publishState(on ? "FAN_REQ_APP=ON" : "FAN_REQ_APP=OFF");
+}
+
 void onMqttMessage(char* topic, byte* payload, unsigned int len) {
   String msg;
   msg.reserve(len);
@@ -1186,15 +1235,34 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len) {
     return;
   }
 
-  if (msg.equalsIgnoreCase("FAN=ON") || msg.equalsIgnoreCase("PUMP=ON")) {
+  if (msg.equalsIgnoreCase("PUMP=ON")) {
+    autoAbort("mqtt pump command");
     pumpReqApp = true;
-    publishState("PUMP_REQ_APP=ON");
-  } else if (msg.equalsIgnoreCase("FAN=OFF") || msg.equalsIgnoreCase("PUMP=OFF")) {
+    manualPumpUntil = millis() + MANUAL_MAX_RUN_MS;
+    publishPumpRequestState(true);
+  } else if (msg.equalsIgnoreCase("PUMP=OFF")) {
     pumpReqApp = false;
-    publishState("PUMP_REQ_APP=OFF");
+    manualPumpUntil = 0;
+    scheduleNextAutoRunFromNow("mqtt pump off");
+    publishPumpRequestState(false);
+  } else if (msg.equalsIgnoreCase("FAN=ON")) {
+    autoAbort("mqtt fan command");
+    fanManualOverride = true;
+    setFan(true);
+    manualFanUntil = millis() + MANUAL_MAX_RUN_MS;
+    publishFanRequestState(true);
+  } else if (msg.equalsIgnoreCase("FAN=OFF")) {
+    fanManualOverride = false;
+    setFan(false);
+    manualFanUntil = 0;
+    scheduleNextAutoRunFromNow("mqtt fan off");
+    publishFanRequestState(false);
   }
 
   applyPumpRequest();
+  updatePumpRamp();
+  updateFanControl();
+  sendWsState();
 }
 
 bool connectMqttOnce() {
@@ -1308,6 +1376,10 @@ void setup() {
   topicCmd   = "waterplant/" + deviceId + "/cmd";
   topicState = "waterplant/" + deviceId + "/state";
 
+  prefs.begin("security", true);
+  commandToken = prefs.getString("command_token", "");
+  prefs.end();
+
   startApAlwaysOn();
 
   server.on("/", handleRoot);
@@ -1402,7 +1474,8 @@ void loop() {
   if (safetyPrev && !nowInter) {
     if (pumpReqApp) {
       pumpReqApp = false;
-      publishState("PUMP_REQ_APP=OFF (INTERLOCK)");
+      manualPumpUntil = 0;
+      publishPumpRequestState(false);
       Serial.println("[PUMP] App request cleared by interlock release");
     }
   }
@@ -1547,7 +1620,13 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 
       if (msgType == "command") {
         String command = doc["command"] | "";
+        String token = doc["token"] | "";
         bool value = doc["value"] | false;
+
+        if (!isAuthorizedCommandToken(token)) {
+          Serial.println("[WS] unauthorized command");
+          return;
+        }
 
         Serial.printf("[WS] command=%s value=%d\n", command.c_str(), value);
         applyAppCommand(command, value);
@@ -1625,6 +1704,11 @@ void startFirmwareUpdate() {
 
   String version = doc["version"] | "";
   String url = doc["url"] | "";
+  String md5 = doc["md5"] | "";
+
+  if (md5.length() == 0) {
+    md5 = doc["checksum_md5"] | "";
+  }
 
   latestFirmwareVersion = version;
 
@@ -1633,6 +1717,14 @@ void startFirmwareUpdate() {
     updateProgress = 0;
     sendWsState();
     Serial.println("[OTA] manifest missing version or url");
+    return;
+  }
+
+  if (md5.length() != 32) {
+    updateStatus = "failed";
+    updateProgress = 0;
+    sendWsState();
+    Serial.println("[OTA] manifest missing valid md5 checksum");
     return;
   }
 
@@ -1698,6 +1790,17 @@ void startFirmwareUpdate() {
     endFirmwareLedProgress(true);
     Serial.printf("[OTA] Update.begin failed: %s\n", Update.errorString());
     binHttp.end();
+    return;
+  }
+
+  if (!Update.setMD5(md5.c_str())) {
+    updateStatus = "failed";
+    updateProgress = 0;
+    sendWsState();
+    endFirmwareLedProgress(true);
+    Serial.println("[OTA] invalid md5 checksum");
+    binHttp.end();
+    Update.abort();
     return;
   }
 

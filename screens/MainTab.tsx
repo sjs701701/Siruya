@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import Video, {ResizeMode} from 'react-native-video';
 import AddDeviceModal from '../features/devices/AddDeviceModal';
 import AirFlowEffect from '../features/devices/AirFlowEffect';
 import DeviceActionButton from '../features/devices/DeviceActionButton';
@@ -39,13 +40,16 @@ import {useDevices} from '../features/devices/useDevices';
 const WATER_CYCLE_REFERENCE_MS = 20 * 60 * 1000;
 const MIN_ACTIVE_WATER_PROGRESS = 0.18;
 const LIGHT_CARD_COLOR = '#dfe1e3';
+const WATER_SUPPLY_CARD_BACKGROUND = require('../assets/images/effects/water-supply-nature.png');
+const WATER_SUPPLY_VIDEO_SOURCE = {
+  uri: require('../assets/video/water-supply.mp4'),
+};
 
 function MainTab() {
   const carouselRef = useRef<ScrollView>(null);
   const {width: screenWidth} = useWindowDimensions();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [activeDeviceIndex, setActiveDeviceIndex] = useState(0);
-  const [now, setNow] = useState(Date.now());
   const {
     devices,
     selectedDevice,
@@ -58,26 +62,6 @@ function MainTab() {
 
   const carouselWidth = Math.max(screenWidth - 54, 280);
   const activeDevice = devices[activeDeviceIndex];
-  const activeGrowth = useMemo(
-    () =>
-      activeDevice
-        ? getGrowthProgress(activeDevice.growthStartedAt, now)
-        : null,
-    [activeDevice, now],
-  );
-  const nextSprayText = useMemo(
-    () => (activeDevice ? getNextSprayText(activeDevice.runtime, now) : ''),
-    [activeDevice, now],
-  );
-  const waterCycleProgress = useMemo(
-    () => (activeDevice ? getWaterCycleProgress(activeDevice, now) : 0),
-    [activeDevice, now],
-  );
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     if (devices.length === 0) {
@@ -148,7 +132,7 @@ function MainTab() {
         ]}
         scrollEnabled={devices.length === 0}
         showsVerticalScrollIndicator={false}>
-        {devices.length > 0 && activeDevice && activeGrowth ? (
+        {devices.length > 0 && activeDevice ? (
           <View style={styles.registeredHome}>
             <ScrollView
               ref={carouselRef}
@@ -184,47 +168,25 @@ function MainTab() {
             )}
 
             <View style={[styles.metricGrid, {width: carouselWidth}]}>
-              <View style={[styles.metricCard, styles.waterCycleCard]}>
-                <Text style={styles.metricTitle}>물 공급주기</Text>
-                <View style={styles.waterGaugeSlot}>
-                  <WaterSupplyGauge
-                    backgroundColor={LIGHT_CARD_COLOR}
-                    progress={waterCycleProgress}
-                    value={nextSprayText}
-                  />
-                </View>
-              </View>
+              <WaterCycleMetricCard device={activeDevice} />
 
               <View style={styles.sideMetricColumn}>
                 <ControlStatusCard
-                  active
+                  active={activeDevice.controls.fan}
                   effect="airflow"
                   title="팬 작동"
                   tone="dark"
                 />
                 <ControlStatusCard
                   active={activeDevice.controls.water}
+                  effect="waterVideo"
                   title="물 공급"
                   tone="light"
                 />
               </View>
             </View>
 
-            <View style={[styles.growthCard, {width: carouselWidth}]}>
-              <Text style={styles.metricTitle}>성장 진행</Text>
-              <View style={styles.growthLabels}>
-                <Text style={styles.growthLabel}>시작</Text>
-                <Text style={styles.growthLabel}>{GROWTH_CYCLE_DAYS}일</Text>
-              </View>
-              <View style={styles.growthTrack}>
-                <View
-                  style={[
-                    styles.growthFill,
-                    {width: `${activeGrowth.progressPercent}%`},
-                  ]}
-                />
-              </View>
-            </View>
+            <GrowthProgressCard device={activeDevice} width={carouselWidth} />
           </View>
         ) : (
           <View style={styles.emptyHome}>
@@ -330,6 +292,61 @@ function DeviceStatusBadge({status}: {status: DeviceStatus}) {
   );
 }
 
+function WaterCycleMetricCard({device}: {device: Device}) {
+  const [now, setNow] = useState(Date.now());
+  const nextSprayText = useMemo(
+    () => getNextSprayText(device.runtime, now),
+    [device.runtime, now],
+  );
+  const waterCycleProgress = useMemo(
+    () => getWaterCycleProgress(device, now),
+    [device, now],
+  );
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <View style={[styles.metricCard, styles.waterCycleCard]}>
+      <Text style={styles.metricTitle}>물 공급주기</Text>
+      <View style={styles.waterGaugeSlot}>
+        <WaterSupplyGauge
+          backgroundColor={LIGHT_CARD_COLOR}
+          progress={waterCycleProgress}
+          value={nextSprayText}
+        />
+      </View>
+    </View>
+  );
+}
+
+function GrowthProgressCard({device, width}: {device: Device; width: number}) {
+  const growth = useMemo(
+    () => getGrowthProgress(device.growthStartedAt),
+    [device.growthStartedAt],
+  );
+
+  return (
+    <View style={[styles.growthCard, {width}]}>
+      <Text style={styles.metricTitle}>성장 진행</Text>
+      <View style={styles.growthLabels}>
+        <Text style={styles.growthLabel}>시작</Text>
+        <Text style={styles.growthLabel}>{GROWTH_CYCLE_DAYS}일</Text>
+      </View>
+      <View style={styles.growthTrack}>
+        <View
+          style={[
+            styles.growthFill,
+            {width: `${growth.progressPercent}%`},
+          ]}
+        />
+      </View>
+    </View>
+  );
+}
+
 function ControlStatusCard({
   active,
   effect,
@@ -337,11 +354,12 @@ function ControlStatusCard({
   tone,
 }: {
   active: boolean;
-  effect?: 'airflow';
+  effect?: 'airflow' | 'waterVideo';
   title: string;
   tone: 'dark' | 'light';
 }) {
   const isDark = tone === 'dark';
+  const isImageBacked = effect === 'waterVideo';
 
   return (
     <View
@@ -349,6 +367,25 @@ function ControlStatusCard({
         styles.controlCard,
         isDark ? styles.controlCardDark : styles.controlCardLight,
       ]}>
+      {isImageBacked && (
+        <>
+          <Image
+            resizeMode="cover"
+            source={WATER_SUPPLY_CARD_BACKGROUND}
+            style={styles.waterSupplyImage}
+          />
+          <Video
+            controls={false}
+            muted
+            paused={!active}
+            repeat
+            resizeMode={ResizeMode.COVER}
+            source={WATER_SUPPLY_VIDEO_SOURCE}
+            style={styles.waterSupplyVideo}
+          />
+          <View style={styles.waterSupplyImageOverlay} />
+        </>
+      )}
       {effect === 'airflow' && (
         <AirFlowEffect active={active} style={styles.airFlowLayer} />
       )}
@@ -357,7 +394,7 @@ function ControlStatusCard({
           numberOfLines={1}
           style={[
             styles.metricTitle,
-            isDark && styles.metricTitleOnDark,
+            (isDark || isImageBacked) && styles.metricTitleOnDark,
           ]}>
           {title}
         </Text>
@@ -515,7 +552,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   heroCard: {
-    backgroundColor: '#202123',
+    backgroundColor: '#1e1e1e',
     borderRadius: 20,
     boxShadow: [
       {
@@ -526,6 +563,8 @@ const styles = StyleSheet.create({
         spreadDistance: -10,
       },
     ],
+    experimental_backgroundImage:
+      'linear-gradient(to bottom right, #1e1e1e, #525252)',
     height: 286,
     overflow: 'hidden',
     position: 'relative',
@@ -672,7 +711,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   controlCardDark: {
-    backgroundColor: '#15171b',
+    backgroundColor: '#060A0D',
     boxShadow: [
       {
         blurRadius: 18,
@@ -682,6 +721,8 @@ const styles = StyleSheet.create({
         spreadDistance: -12,
       },
     ],
+    experimental_backgroundImage:
+      'radial-gradient(50% 50% at 50% 50%, #263648 0%, #060A0D 100%)',
   },
   controlCardLight: {
     backgroundColor: LIGHT_CARD_COLOR,
@@ -709,6 +750,31 @@ const styles = StyleSheet.create({
     opacity: 0.95,
     position: 'absolute',
     right: 0,
+  },
+  waterSupplyImage: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 0,
+  },
+  waterSupplyVideo: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 1,
+  },
+  waterSupplyImageOverlay: {
+    backgroundColor: 'rgba(5, 12, 8, 0.22)',
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 1,
   },
   controlStatusBadge: {
     borderRadius: 999,

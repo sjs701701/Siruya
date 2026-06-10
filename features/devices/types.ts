@@ -36,6 +36,7 @@ export type DeviceRuntime = {
 export type Device = {
   id: string;
   hardwareId?: string;
+  commandToken?: string;
   isDemo?: boolean;
   registeredAt: number;
   growthStartedAt: number;

@@ -19,20 +19,6 @@ type Props = {
 function DeviceCard({device, onPress, onPower}: Props) {
   const product = getProductDefinition(device.type);
   const isActive = device.controls.running;
-  const [now, setNow] = useState(Date.now());
-  const nextSprayText = useMemo(
-    () => getNextSprayText(device.runtime, now),
-    [device.runtime, now],
-  );
-  const hasCountdown = useMemo(
-    () => hasActiveAutoCountdown(device.runtime, now),
-    [device.runtime, now],
-  );
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <HapticPressable
@@ -76,10 +62,8 @@ function DeviceCard({device, onPress, onPower}: Props) {
         </View>
       )}
 
-      {device.type === 'sprout-grower' && hasCountdown && (
-        <View style={styles.nextSprayBadge}>
-          <Text style={styles.nextSprayText}>다음 {nextSprayText}</Text>
-        </View>
+      {device.type === 'sprout-grower' && (
+        <NextSprayBadge runtime={device.runtime} />
       )}
 
       {device.type === 'sprout-grower' && (
@@ -93,6 +77,33 @@ function DeviceCard({device, onPress, onPower}: Props) {
         </View>
       )}
     </HapticPressable>
+  );
+}
+
+function NextSprayBadge({runtime}: {runtime: Device['runtime']}) {
+  const [now, setNow] = useState(Date.now());
+  const nextSprayText = useMemo(
+    () => getNextSprayText(runtime, now),
+    [runtime, now],
+  );
+  const hasCountdown = useMemo(
+    () => hasActiveAutoCountdown(runtime, now),
+    [runtime, now],
+  );
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!hasCountdown) {
+    return null;
+  }
+
+  return (
+    <View style={styles.nextSprayBadge}>
+      <Text style={styles.nextSprayText}>다음 {nextSprayText}</Text>
+    </View>
   );
 }
 

@@ -251,10 +251,11 @@ export function ensureDeviceWebSocket() {
   };
 
   nextSocket.onclose = () => {
-    if (socket === nextSocket) {
-      socket = null;
+    if (socket !== nextSocket) {
+      return;
     }
 
+    socket = null;
     rejectOpenWaiters(new Error('WS_NOT_CONNECTED'));
 
     if (reconnectTimer) {
@@ -324,6 +325,7 @@ export async function sendWebSocketDeviceCommand(params: {
       type: 'command',
       deviceId,
       command: params.command,
+      token: params.device.commandToken,
       value: params.value,
     }),
   );

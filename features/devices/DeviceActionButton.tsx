@@ -26,13 +26,18 @@ function DeviceActionButton({
   style,
   tone = 'light',
   useBackdropBlur = true,
+  accessibilityRole,
   disabled,
   ...props
 }: DeviceActionButtonProps) {
   const isDark = tone === 'dark';
 
   return (
-    <HapticPressable {...props} disabled={disabled} style={[styles.pressable, style, disabled && styles.pressableDisabled]}>
+    <HapticPressable
+      {...props}
+      accessibilityRole={accessibilityRole ?? 'button'}
+      disabled={disabled}
+      style={[styles.pressable, style, disabled && styles.pressableDisabled]}>
       {({pressed}) => (
         <View
           style={[

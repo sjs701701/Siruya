@@ -34,6 +34,18 @@ type Esp32StatusResponse = {
   update_progress?: number;
 };
 
+function createCommandPayload(params: {
+  command: DeviceCommand | 'firmwareUpdate';
+  device: Device;
+  value: boolean;
+}) {
+  return {
+    command: params.command,
+    token: params.device.commandToken,
+    value: params.value,
+  };
+}
+
 export type DeviceStatusSnapshot = {
   online: boolean;
   running: boolean;
@@ -85,10 +97,7 @@ export async function sendDeviceCommand(params: {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        command: params.command,
-        value: params.value,
-      }),
+      body: JSON.stringify(createCommandPayload(params)),
       signal: controller.signal,
     });
     const text = await response.text();
@@ -192,10 +201,13 @@ export async function sendFirmwareUpdateCommand(device: Device) {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        command: 'firmwareUpdate',
-        value: true,
-      }),
+      body: JSON.stringify(
+        createCommandPayload({
+          command: 'firmwareUpdate',
+          device,
+          value: true,
+        }),
+      ),
       signal: controller.signal,
     });
     const text = await response.text();

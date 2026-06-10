@@ -61,6 +61,7 @@ export function createDevice(params: {
   room: string;
   ipAddress?: string;
   hardwareId?: string;
+  commandToken?: string;
 }): Device {
   const product = getProductDefinition(params.type);
   const createdAt = Date.now();
@@ -68,6 +69,7 @@ export function createDevice(params: {
   return {
     id: `${params.type}-${createdAt}`,
     hardwareId: params.hardwareId,
+    commandToken: params.commandToken,
     registeredAt: createdAt,
     growthStartedAt: createdAt,
     name: params.name.trim() || product.defaultName,

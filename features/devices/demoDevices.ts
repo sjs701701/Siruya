@@ -35,12 +35,14 @@ export function createDemoProvisionedDevice(params: {
   room: string;
   ipAddress?: string;
   hardwareId?: string;
+  commandToken?: string;
 }): Device {
   const createdAt = Date.now();
 
   return {
     id: `demo-${params.type}-${createdAt}`,
     hardwareId: params.hardwareId ?? demoHardwareId,
+    commandToken: params.commandToken ?? 'demo-command-token',
     isDemo: true,
     registeredAt: createdAt,
     growthStartedAt: createdAt,

@@ -12,6 +12,7 @@ export type WifiNetwork = {
 export type ProvisionResponse = {
   ok?: boolean;
   device_id?: string;
+  command_token?: string;
   ap_ssid?: string;
   sta_status?: string;
   ip?: string;
@@ -25,12 +26,32 @@ export type WifiPermissionResult = {
 const DEFAULT_DEVICE_WIFI_PREFIXES = ['Water', 'WaterPlant', 'ESP32C3_SETUP'];
 const delay = (ms: number) =>
   new Promise<void>(resolve => setTimeout(resolve, ms));
+const deniedAndroidPermissions = new Set<string>();
+const blockedAndroidPermissions = new Set<string>();
 
 async function requestAndroidPermission(
   permission: Parameters<typeof PermissionsAndroid.request>[0],
   title: string,
   message: string,
 ) {
+  const alreadyGranted = await PermissionsAndroid.check(permission);
+
+  if (alreadyGranted) {
+    deniedAndroidPermissions.delete(permission);
+    blockedAndroidPermissions.delete(permission);
+    return {granted: true, blocked: false};
+  }
+
+  if (
+    deniedAndroidPermissions.has(permission) ||
+    blockedAndroidPermissions.has(permission)
+  ) {
+    return {
+      granted: false,
+      blocked: blockedAndroidPermissions.has(permission),
+    };
+  }
+
   const result = await PermissionsAndroid.request(permission, {
     title,
     message,
@@ -38,10 +59,19 @@ async function requestAndroidPermission(
     buttonNegative: '거부',
   });
 
-  return {
-    granted: result === PermissionsAndroid.RESULTS.GRANTED,
-    blocked: result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN,
-  };
+  const granted = result === PermissionsAndroid.RESULTS.GRANTED;
+  const blocked = result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN;
+
+  if (granted) {
+    deniedAndroidPermissions.delete(permission);
+    blockedAndroidPermissions.delete(permission);
+  } else if (blocked) {
+    blockedAndroidPermissions.add(permission);
+  } else {
+    deniedAndroidPermissions.add(permission);
+  }
+
+  return {granted, blocked};
 }
 
 export async function requestWifiScanPermission(): Promise<WifiPermissionResult> {

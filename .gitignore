@@ -56,6 +56,10 @@ yarn-error.log
 # Bundle artifact
 *.jsbundle
 
+# Local firmware secrets
+arduino/**/secrets.h
+!arduino/**/secrets.example.h
+
 # Ruby / CocoaPods
 /ios/Pods/
 /vendor/bundle/
@@ -65,3 +69,10 @@ yarn-error.log
 
 # testing
 /coverage
+
+# Local Codex / emulator scratch output
+/.codex-metro-*.log
+/emulator-*.png
+/siruya-*.png
+/*.zip
+/.tools/

@@ -15,10 +15,6 @@ import {lightScreenBackground, lightScreenBackgroundColor} from './deviceTheme';
 import {getDeviceStatusLabel} from './deviceStatusLabel';
 import {getProductDefinition} from './deviceRegistry';
 import {ControlRow} from './DeviceFormFields';
-import {
-  fetchFirmwareManifest,
-  hasDifferentFirmwareVersion,
-} from './firmwareManifest';
 import {createEmptyRuntime} from './deviceRuntime';
 import {
   getAutoStateLabel,
@@ -44,59 +40,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
   const [isSendingFirmwareCommand, setIsSendingFirmwareCommand] =
     useState(false);
 
-  const deviceId = device?.id;
   const product = getProductDefinition(device?.type ?? 'sprout-grower');
-
-  useEffect(() => {
-    if (!deviceId || device?.isDemo || !product.firmwareManifestUrl) {
-      return;
-    }
-
-    let cancelled = false;
-
-    fetchFirmwareManifest(product.firmwareManifestUrl)
-      .then(manifest => {
-        if (cancelled || !manifest.version) {
-          return;
-        }
-
-        onUpdate(deviceId, current => {
-          const currentRuntime = current.runtime ?? createEmptyRuntime();
-          const updateAvailable = hasDifferentFirmwareVersion(
-            currentRuntime.firmwareVersion,
-            manifest.version,
-          );
-          const currentStatus = currentRuntime.firmwareUpdateStatus;
-          const nextStatus =
-            currentStatus === 'updating' || currentStatus === 'updated'
-              ? currentStatus
-              : updateAvailable
-                ? 'available'
-                : currentStatus ?? 'idle';
-
-          if (
-            currentRuntime.latestFirmwareVersion === manifest.version &&
-            currentRuntime.firmwareUpdateStatus === nextStatus
-          ) {
-            return current;
-          }
-
-          return {
-            ...current,
-            runtime: {
-              ...currentRuntime,
-              latestFirmwareVersion: manifest.version,
-              firmwareUpdateStatus: nextStatus,
-            },
-          };
-        });
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [device?.isDemo, deviceId, onUpdate, product.firmwareManifestUrl]);
 
   if (!device) {
     return null;

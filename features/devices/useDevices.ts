@@ -116,18 +116,62 @@ function snapshotFromWsState(state: DeviceWsState): DeviceStatusSnapshot {
   };
 }
 
+export function mergePolledDeviceStatuses(
+  latestDevices: Device[],
+  refreshedDevicesById: ReadonlyMap<string, Device>,
+) {
+  let changed = false;
+  const nextDevices = latestDevices.map(device => {
+    const refreshedDevice = refreshedDevicesById.get(device.id);
+
+    if (!refreshedDevice || device.hardwareId) {
+      return device;
+    }
+
+    changed = true;
+    return {
+      ...device,
+      status: refreshedDevice.status,
+      controls: {
+        ...device.controls,
+        running: refreshedDevice.controls.running,
+        water: refreshedDevice.controls.water,
+        fan: refreshedDevice.controls.fan,
+      },
+      runtime: refreshedDevice.runtime,
+    };
+  });
+
+  return changed ? nextDevices : latestDevices;
+}
+
+export function shouldPersistDevices(
+  hasLoadedDevices: boolean,
+  canPersistDevices: boolean,
+) {
+  return hasLoadedDevices && canPersistDevices;
+}
+
 export function useDevices() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [hasLoadedDevices, setHasLoadedDevices] = useState(false);
   const devicesRef = useRef(devices);
+  const canPersistDevicesRef = useRef(false);
 
   useEffect(() => {
     devicesRef.current = devices;
   }, [devices]);
 
   useEffect(() => {
+    let cancelled = false;
+
     AsyncStorage.getItem(STORAGE_KEY)
       .then(value => {
+        if (cancelled) {
+          return;
+        }
+
         if (value) {
           const now = Date.now();
           const storedDevices = JSON.parse(value) as Device[];
@@ -137,17 +181,40 @@ export function useDevices() {
             ),
           );
         }
+
+        canPersistDevicesRef.current = true;
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) {
+          canPersistDevicesRef.current = false;
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHasLoadedDevices(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    if (!shouldPersistDevices(hasLoadedDevices, canPersistDevicesRef.current)) {
+      return;
+    }
+
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(devices)).catch(
       () => undefined,
     );
-  }, [devices]);
+  }, [devices, hasLoadedDevices]);
 
   useEffect(() => {
+    if (!hasLoadedDevices) {
+      return;
+    }
+
     let cancelled = false;
 
     const refreshFirmwareManifests = async () => {
@@ -176,9 +243,8 @@ export function useDevices() {
         return;
       }
 
-      let nextSelectedDevice: Device | null | undefined;
-
       setDevices(currentDevices => {
+        let changed = false;
         const nextDevices = currentDevices.map(device => {
           if (device.isDemo) {
             return device;
@@ -227,19 +293,24 @@ export function useDevices() {
             },
           };
 
-          if (selectedDevice?.id === nextDevice.id) {
-            nextSelectedDevice = nextDevice;
+          changed = true;
+          return nextDevice;
+        });
+
+        if (!changed) {
+          return currentDevices;
+        }
+
+        setSelectedDevice(current => {
+          if (!current) {
+            return current;
           }
 
-          return nextDevice;
+          return nextDevices.find(device => device.id === current.id) ?? current;
         });
 
         return nextDevices;
       });
-
-      if (nextSelectedDevice) {
-        setSelectedDevice(nextSelectedDevice);
-      }
     };
 
     refreshFirmwareManifests();
@@ -252,34 +323,37 @@ export function useDevices() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [devices.length, selectedDevice?.id]);
+  }, [hasLoadedDevices]);
 
   useEffect(() => {
     let cancelled = false;
 
     const refreshStatuses = async () => {
       const currentDevices = devicesRef.current;
-      const nextDevices = await Promise.all(
+      const refreshedDevices = await Promise.all(
         currentDevices.map(async device => {
           if (device.isDemo) {
-            return device;
+            return null;
           }
 
           if (device.hardwareId || !device.ipAddress) {
-            return device;
+            return null;
           }
 
           try {
             const snapshot = await fetchDeviceStatus(device);
-            return applyStatusSnapshot(device, snapshot);
+            return [device.id, applyStatusSnapshot(device, snapshot)] as const;
           } catch {
-            return {
-              ...device,
-              status: 'offline' as const,
-              runtime: {
-                ...(device.runtime ?? createEmptyRuntime()),
+            return [
+              device.id,
+              {
+                ...device,
+                status: 'offline' as const,
+                runtime: {
+                  ...(device.runtime ?? createEmptyRuntime()),
+                },
               },
-            };
+            ] as const;
           }
         }),
       );
@@ -288,13 +362,35 @@ export function useDevices() {
         return;
       }
 
-      setDevices(nextDevices);
-      setSelectedDevice(current => {
-        if (!current) {
-          return current;
+      const refreshedDevicesById = new Map(
+        refreshedDevices.filter(
+          (device): device is readonly [string, Device] => Boolean(device),
+        ),
+      );
+
+      if (refreshedDevicesById.size === 0) {
+        return;
+      }
+
+      setDevices(latestDevices => {
+        const nextDevices = mergePolledDeviceStatuses(
+          latestDevices,
+          refreshedDevicesById,
+        );
+
+        if (nextDevices === latestDevices) {
+          return latestDevices;
         }
 
-        return nextDevices.find(device => device.id === current.id) ?? current;
+        setSelectedDevice(current => {
+          if (!current) {
+            return current;
+          }
+
+          return nextDevices.find(device => device.id === current.id) ?? current;
+        });
+
+        return nextDevices;
       });
     };
 
@@ -320,46 +416,7 @@ export function useDevices() {
 
       setDevices(currentDevices => {
         if (message.type === 'hello_ok') {
-          const onlineDeviceIds = message.devices ?? [];
-          const claimedIds = new Set(
-            currentDevices
-              .map(device => device.hardwareId)
-              .filter((id): id is string => Boolean(id)),
-          );
-          const unclaimedOnlineIds = onlineDeviceIds.filter(
-            deviceId => !claimedIds.has(deviceId),
-          );
-          const unboundDevices = currentDevices.filter(
-            device =>
-              !device.hardwareId &&
-              (device.type === 'sprout-grower' || device.status === 'setup'),
-          );
-
-          if (unclaimedOnlineIds.length !== 1 || unboundDevices.length !== 1) {
-            return currentDevices;
-          }
-
-          const [onlineDeviceId] = unclaimedOnlineIds;
-          const [unboundDevice] = unboundDevices;
-          const nextDevices = currentDevices.map(device =>
-            device.id === unboundDevice.id
-              ? {
-                  ...device,
-                  hardwareId: onlineDeviceId,
-                  status: 'online' as const,
-                }
-              : device,
-          );
-
-          setSelectedDevice(current => {
-            if (!current) {
-              return current;
-            }
-
-            return nextDevices.find(device => device.id === current.id) ?? current;
-          });
-
-          return nextDevices;
+          return currentDevices;
         }
 
         const nextDevices = currentDevices.map(device => {
@@ -484,6 +541,7 @@ export function useDevices() {
         registeredAt: existing.registeredAt,
         growthStartedAt: existing.growthStartedAt,
         hardwareId: normalizedDevice.hardwareId ?? existing.hardwareId,
+        commandToken: normalizedDevice.commandToken ?? existing.commandToken,
         ipAddress: normalizedDevice.ipAddress ?? existing.ipAddress,
         controls: {
           ...existing.controls,

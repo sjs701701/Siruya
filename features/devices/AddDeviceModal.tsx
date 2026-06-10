@@ -98,6 +98,9 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
   const [provisionedDeviceId, setProvisionedDeviceId] = useState<
     string | undefined
   >();
+  const [provisionedCommandToken, setProvisionedCommandToken] = useState<
+    string | undefined
+  >();
   const [name, setName] = useState('');
   const [room, setRoom] = useState('');
   const [isDemoMode, setIsDemoMode] = useState(false);
@@ -135,6 +138,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     setConnectionMessage('');
     setProvisionedIp(undefined);
     setProvisionedDeviceId(undefined);
+    setProvisionedCommandToken(undefined);
     setName(defaultProduct.defaultName);
     setRoom(defaultProduct.defaultRoom);
     setIsDemoMode(false);
@@ -212,6 +216,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     setConnectionMessage('화면 확인용 데모 연결을 시작합니다.');
     setProvisionedIp(undefined);
     setProvisionedDeviceId(undefined);
+    setProvisionedCommandToken(undefined);
     setName(defaultProduct.defaultName);
     setRoom(defaultProduct.defaultRoom);
   };
@@ -335,6 +340,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
       });
       setProvisionedIp(result.ip);
       setProvisionedDeviceId(result.device_id);
+      setProvisionedCommandToken(result.command_token);
       setConnectionMessage(
         result.ip
           ? `기기가 ${selectedNetwork.ssid}에 연결되었습니다. IP: ${result.ip}`
@@ -360,6 +366,12 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     }
 
     if (!selectedNetwork) {
+      try {
+        await disconnectFromDeviceWifi(selectedProduct.setupSsidPrefix);
+      } catch {
+        // The phone may already be away from the device AP.
+      }
+
       return;
     }
 
@@ -376,6 +388,11 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
         `${selectedNetwork.ssid}로 자동 연결하지 못했습니다. 휴대폰 Wi-Fi 설정에서 직접 연결되어 있는지 확인해주세요.`,
       );
     }
+  };
+
+  const closeModal = async () => {
+    await returnPhoneToHomeWifi();
+    onClose();
   };
 
   const goBack = () => {
@@ -409,6 +426,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
           room,
           ipAddress: provisionedIp,
           hardwareId: provisionedDeviceId,
+          commandToken: provisionedCommandToken,
         })
       : createDevice({
           type: selectedType,
@@ -416,6 +434,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
           room,
           ipAddress: provisionedIp,
           hardwareId: provisionedDeviceId,
+          commandToken: provisionedCommandToken,
         });
 
     onAdd(nextDevice);
@@ -540,6 +559,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     setDeviceNetworks([]);
     setSelectedDeviceNetwork(null);
     setIsDeviceWifiConnected(false);
+    setProvisionedCommandToken(undefined);
     setDeviceScanError('');
     productScrollRef.current?.scrollTo({
       x: index * productCardSnapInterval,
@@ -569,7 +589,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
     <Modal
       visible={visible}
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={closeModal}
       statusBarTranslucent
       navigationBarTranslucent>
       <SafeAreaView style={styles.screen}>
@@ -578,7 +598,7 @@ function AddDeviceModal({visible, onClose, onAdd}: Props) {
           backgroundColor={lightScreenBackgroundColor}
         />
         <View style={styles.header}>
-          <HapticPressable onPress={onClose} style={styles.closeButton}>
+          <HapticPressable onPress={closeModal} style={styles.closeButton}>
             <Text style={styles.closeText}>x</Text>
           </HapticPressable>
           <Text style={styles.title}>{titleByStep[step]}</Text>
