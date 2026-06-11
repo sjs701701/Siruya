@@ -100,6 +100,18 @@ describe('getWaterCycleProgress', () => {
     expect(getWaterCycleProgress(runtime, BASE_NOW)).toBe(0);
   });
 
+  it('uses the device-reported cycle length when available', () => {
+    const oneHourCycleMs = 60 * 60 * 1000;
+    const runtime = makeRuntime({
+      autoCycleMs: oneHourCycleMs,
+      autoNextRunInMs: oneHourCycleMs,
+    });
+
+    expect(
+      getWaterCycleProgress(runtime, BASE_NOW + oneHourCycleMs * 0.5),
+    ).toBeCloseTo(0.5, 2);
+  });
+
   it('never moves backwards from countdown end through preparing to watering', () => {
     const runtime = makeRuntime();
     const countdownEnd = getWaterCycleProgress(

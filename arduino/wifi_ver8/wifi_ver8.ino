@@ -13,7 +13,7 @@
 #include <math.h>
 #include "secrets.h"
 
-#define FIRMWARE_VERSION "1.0.8"
+#define FIRMWARE_VERSION "1.0.9"
 #define FIRMWARE_MANIFEST_URL "https://mqtt.app2-server.kr/firmware/sprout-grower/latest.json"
 
 
@@ -126,7 +126,7 @@ static const unsigned long WS_STATE_INTERVAL_MS = 3000;
 void startWebSocket();
 void sendWsState();
 void onWsEvent(WStype_t type, uint8_t* payload, size_t length);
-bool applyAppCommand(String command, bool value);
+bool applyAppCommand(String command, JsonVariantConst value);
 void publishPumpRequestState(bool on);
 void publishFanRequestState(bool on);
 String createCommandToken();
@@ -138,6 +138,8 @@ void updateManualTimeouts();
 void stopAllOperationForFirmwareUpdate();
 void restorePowerOnAfterOta();
 void resetRuntimeState();
+void loadAutoCycleSettings();
+bool setAutoCycleMinutes(unsigned long minutes, bool persist);
 
 extern bool autoPrevInterlock;
 extern bool autoImmediateRunPending;
@@ -449,14 +451,17 @@ bool prevWantOn = false;
 // =======================================================
 // 자동 동작
 // - 전원 ON 직후 3초 점멸 후 20초 분사
-// - 이후 2시간마다 20초 분사
+// - 이후 설정된 주기마다 20초 분사
 // =======================================================
-static const unsigned long AUTO_CHECK_INTERVAL_MS = 1000UL * 60UL * 60UL * 2UL;
+static const unsigned long DEFAULT_AUTO_CHECK_INTERVAL_MS = 1000UL * 60UL * 60UL * 2UL;
+static const unsigned long MIN_AUTO_CHECK_INTERVAL_MS     = 1000UL * 60UL * 10UL;
+static const unsigned long MAX_AUTO_CHECK_INTERVAL_MS     = 1000UL * 60UL * 60UL * 6UL;
 static const unsigned long AUTO_RUN_MS            = 20000UL;
 static const unsigned long AUTO_PRE_BLINK_MS      = 3000UL;
 static const unsigned long AUTO_BLINK_INTERVAL_MS = 250UL;
 static const unsigned long MANUAL_MAX_RUN_MS      = 60000UL;
 
+unsigned long autoCheckIntervalMs = DEFAULT_AUTO_CHECK_INTERVAL_MS;
 unsigned long autoNextCheckAt = 0;
 unsigned long autoRunEndAt    = 0;
 bool autoPrevInterlock = false;
@@ -472,6 +477,49 @@ enum AutoState {
 
 AutoState autoState = AUTO_IDLE;
 unsigned long autoBlinkUntil = 0;
+
+unsigned long getAutoCycleMinutes() {
+  return autoCheckIntervalMs / 60000UL;
+}
+
+unsigned long clampAutoCycleMinutes(unsigned long minutes) {
+  const unsigned long minMinutes = MIN_AUTO_CHECK_INTERVAL_MS / 60000UL;
+  const unsigned long maxMinutes = MAX_AUTO_CHECK_INTERVAL_MS / 60000UL;
+
+  if (minutes < minMinutes) return minMinutes;
+  if (minutes > maxMinutes) return maxMinutes;
+  return minutes;
+}
+
+bool setAutoCycleMinutes(unsigned long minutes, bool persist) {
+  unsigned long clampedMinutes = clampAutoCycleMinutes(minutes);
+  unsigned long nextIntervalMs = clampedMinutes * 60000UL;
+
+  if (nextIntervalMs == autoCheckIntervalMs) {
+    return true;
+  }
+
+  autoCheckIntervalMs = nextIntervalMs;
+
+  if (persist) {
+    prefs.begin("settings", false);
+    prefs.putULong("cycle_min", clampedMinutes);
+    prefs.end();
+  }
+
+  Serial.printf("[AUTO] cycle set to %lu minutes\n", clampedMinutes);
+  return true;
+}
+
+void loadAutoCycleSettings() {
+  const unsigned long defaultMinutes = DEFAULT_AUTO_CHECK_INTERVAL_MS / 60000UL;
+
+  prefs.begin("settings", true);
+  unsigned long savedMinutes = prefs.getULong("cycle_min", defaultMinutes);
+  prefs.end();
+
+  setAutoCycleMinutes(savedMinutes, false);
+}
 
 // =======================================================
 // 전원 OFF/ON 시 전체 런타임 상태 초기화
@@ -578,7 +626,7 @@ void scheduleNextAutoRunFromNow(const char* reason) {
   autoBlinkUntil = 0;
   autoImmediateRunPending = false;
   autoPrevInterlock = true;
-  autoNextCheckAt = millis() + AUTO_CHECK_INTERVAL_MS;
+  autoNextCheckAt = millis() + autoCheckIntervalMs;
   clearSafeLedOverride();
 
   Serial.printf("[AUTO] next run scheduled after manual: %s\n", reason);
@@ -700,7 +748,7 @@ void updateAutoSequence() {
         pumpReqAuto = false;
         autoState = AUTO_IDLE;
         autoRunEndAt = 0;
-        autoNextCheckAt = now + AUTO_CHECK_INTERVAL_MS;
+        autoNextCheckAt = now + autoCheckIntervalMs;
         clearSafeLedOverride();
         Serial.println("[AUTO] RUN end -> next run scheduled");
       }
@@ -1067,7 +1115,7 @@ void handleAppCommand() {
 
   String command = doc["command"] | "";
   String token = doc["token"] | "";
-  bool value = doc["value"] | false;
+  JsonVariantConst value = doc["value"];
 
   if (!isAuthorizedCommandToken(token)) {
     sendJson(403, "{\"ok\":false,\"message\":\"unauthorized command\"}");
@@ -1106,6 +1154,8 @@ void handleStatus() {
   json += "\"fan_on\":" + String(fanOn ? "true" : "false") + ",";
   json += "\"fan_run_left_ms\":" + String(fanRunUntil == 0 ? 0 : (long)(fanRunUntil - millis())) + ",";
   json += "\"auto_state\":" + String((int)autoState) + ",";
+  json += "\"auto_cycle_ms\":" + String(autoCheckIntervalMs) + ",";
+  json += "\"auto_cycle_minutes\":" + String(getAutoCycleMinutes()) + ",";
   json += "\"auto_next_run_in_ms\":" + String(autoNextCheckAt == 0 ? 0 : max(0L, (long)(autoNextCheckAt - millis()))) + ",";
   json += "\"auto_immediate_pending\":" + String(autoImmediateRunPending ? "true" : "false");
   json += "}";
@@ -1387,6 +1437,8 @@ void setup() {
   commandToken = prefs.getString("command_token", "");
   prefs.end();
 
+  loadAutoCycleSettings();
+
   startApAlwaysOn();
 
   server.on("/", handleRoot);
@@ -1499,7 +1551,7 @@ void loop() {
 void sendWsState() {
   if (!wsConnected) return;
 
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<640> doc;
   doc["type"] = "state";
   doc["deviceId"] = deviceId;
 
@@ -1519,6 +1571,8 @@ void sendWsState() {
   state["fan_on"] = fanOn;
   state["fan_run_left_ms"] = fanRunUntil == 0 ? 0 : (long)(fanRunUntil - millis());
   state["auto_state"] = (int)autoState;
+  state["auto_cycle_ms"] = autoCheckIntervalMs;
+  state["auto_cycle_minutes"] = getAutoCycleMinutes();
   state["auto_next_run_in_ms"] = autoNextCheckAt == 0 ? 0 : max(0L, (long)(autoNextCheckAt - millis()));
   state["auto_immediate_pending"] = autoImmediateRunPending;
 
@@ -1527,9 +1581,11 @@ void sendWsState() {
   ws.sendTXT(json);
 }
 
-bool applyAppCommand(String command, bool value) {
+bool applyAppCommand(String command, JsonVariantConst value) {
+  bool boolValue = value | false;
+
   if (command == "power") {
-    powerEnabled = value;
+    powerEnabled = boolValue;
     abortAllAutoProcesses("app power command");
 
     if (!powerEnabled) {
@@ -1544,11 +1600,19 @@ bool applyAppCommand(String command, bool value) {
 
   } else if (command == "firmwareUpdate") {
     startFirmwareUpdate();
+  } else if (command == "sprayCycle") {
+    if (!value.is<unsigned long>() && !value.is<int>()) {
+      return false;
+    }
+
+    unsigned long minutes = value.as<unsigned long>();
+    setAutoCycleMinutes(minutes, true);
+    scheduleNextAutoRunFromNow("spray cycle command");
   } else if (!powerEnabled) {
     return false;
   } else if (command == "running") {
     abortAllAutoProcesses("app running command");
-    systemEnabled = value;
+    systemEnabled = boolValue;
 
     if (!systemEnabled) {
       manualPumpUntil = 0;
@@ -1563,29 +1627,29 @@ bool applyAppCommand(String command, bool value) {
 
   } else if (command == "water") {
     autoAbort("manual water command");
-    pumpReqApp = value;
-    manualPumpUntil = value ? millis() + MANUAL_MAX_RUN_MS : 0;
+    pumpReqApp = boolValue;
+    manualPumpUntil = boolValue ? millis() + MANUAL_MAX_RUN_MS : 0;
 
-    if (!value) {
+    if (!boolValue) {
       scheduleNextAutoRunFromNow("manual water off");
     }
 
   } else if (command == "fan") {
     autoAbort("manual fan command");
-    fanManualOverride = value;
-    setFan(value);
-    manualFanUntil = value ? millis() + MANUAL_MAX_RUN_MS : 0;
+    fanManualOverride = boolValue;
+    setFan(boolValue);
+    manualFanUntil = boolValue ? millis() + MANUAL_MAX_RUN_MS : 0;
 
-    if (!value) {
+    if (!boolValue) {
       scheduleNextAutoRunFromNow("manual fan off");
     }
 
   } else if (command == "cleanMode") {
     autoAbort("clean mode command");
-    pumpReqApp = value;
-    manualPumpUntil = value ? millis() + MANUAL_MAX_RUN_MS : 0;
+    pumpReqApp = boolValue;
+    manualPumpUntil = boolValue ? millis() + MANUAL_MAX_RUN_MS : 0;
 
-    if (!value) {
+    if (!boolValue) {
       scheduleNextAutoRunFromNow("clean mode off");
     }
 
@@ -1645,14 +1709,14 @@ void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
       if (msgType == "command") {
         String command = doc["command"] | "";
         String token = doc["token"] | "";
-        bool value = doc["value"] | false;
+        JsonVariantConst value = doc["value"];
 
         if (!isAuthorizedCommandToken(token)) {
           Serial.println("[WS] unauthorized command");
           return;
         }
 
-        Serial.printf("[WS] command=%s value=%d\n", command.c_str(), value);
+        Serial.printf("[WS] command=%s\n", command.c_str());
         applyAppCommand(command, value);
       }
 

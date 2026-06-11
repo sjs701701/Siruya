@@ -24,6 +24,7 @@ export type FirmwareUpdateStatus =
 export type DeviceRuntime = {
   autoState: DeviceAutoState;
   autoRunning: boolean;
+  autoCycleMs?: number;
   autoNextRunInMs: number;
   interlockOk: boolean;
   fanRunLeftMs: number;

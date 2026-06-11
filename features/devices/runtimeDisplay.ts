@@ -1,8 +1,8 @@
 import {DeviceRuntime, FirmwareUpdateStatus} from './types';
 
-// 펌웨어 자동분사 주기(AUTO_CHECK_INTERVAL_MS = 2시간)와 같은 값이어야
-// 물 공급주기 게이지가 전체 주기에 걸쳐 차오른다.
-export const WATER_AUTO_CYCLE_MS = 2 * 60 * 60 * 1000;
+// 구버전 펌웨어는 자동분사 주기를 내려주지 않으므로 기존 2시간 기준을 사용한다.
+export const DEFAULT_WATER_AUTO_CYCLE_MS = 2 * 60 * 60 * 1000;
+export const WATER_AUTO_CYCLE_MS = DEFAULT_WATER_AUTO_CYCLE_MS;
 
 // 카운트다운이 0에 닿은 뒤 기기가 preparing/watering을 보고할 때까지의 공백.
 // 기기 상태 푸시(3초)·HTTP 폴링(5초) 주기를 덮을 만큼만 유지한다.
@@ -73,7 +73,11 @@ export function getWaterCycleProgress(
   }
 
   const remainingMs = getRemainingAutoNextRunMs(runtime, now);
-  const elapsedRatio = 1 - Math.min(remainingMs / WATER_AUTO_CYCLE_MS, 1);
+  const cycleMs =
+    runtime?.autoCycleMs && runtime.autoCycleMs > 0
+      ? runtime.autoCycleMs
+      : DEFAULT_WATER_AUTO_CYCLE_MS;
+  const elapsedRatio = 1 - Math.min(remainingMs / cycleMs, 1);
   return Math.min(Math.max(elapsedRatio, 0), PRE_SPRAY_PROGRESS);
 }
 

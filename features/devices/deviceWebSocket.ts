@@ -14,6 +14,8 @@ export type DeviceWsState = {
   fan_on?: boolean;
   fan_run_left_ms?: number;
   auto_state?: number;
+  auto_cycle_ms?: number;
+  auto_cycle_minutes?: number;
   auto_next_run_in_ms?: number;
   auto_immediate_pending?: boolean;
   firmware_version?: string;
@@ -397,8 +399,8 @@ export function subscribeDeviceWebSocket(listener: Listener) {
 
 export async function sendWebSocketDeviceCommand(params: {
   device: Device;
-  command: DeviceCommand | 'firmwareUpdate';
-  value: boolean;
+  command: DeviceCommand | 'firmwareUpdate' | 'sprayCycle';
+  value: boolean | number;
 }) {
   const deviceId = params.device.hardwareId ?? params.device.id;
   const lastSeenAt = getLastDeviceContactAt(params.device);

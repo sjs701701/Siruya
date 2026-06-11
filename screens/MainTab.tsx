@@ -18,12 +18,23 @@ import AirFlowEffect from '../features/devices/AirFlowEffect';
 import ControlActionModal from '../features/devices/ControlActionModal';
 import DeviceActionButton from '../features/devices/DeviceActionButton';
 import DeviceDetailModal, {
+  formatSprayCycleLabel,
+  getSprayCycleMinutes,
   SprayCycleModal,
 } from '../features/devices/DeviceDetailModal';
 import WaterSupplyGauge from '../features/devices/WaterSupplyGauge';
+import {sendDeviceSprayCycleCommand} from '../features/devices/deviceCommands';
 import {getProductDefinition} from '../features/devices/deviceRegistry';
 import {getDeviceStatusLabel} from '../features/devices/deviceStatusLabel';
-import {isDeviceControlReady} from '../features/devices/deviceControl';
+import {
+  getDeviceControlBlockReason,
+  isDeviceControlReady,
+} from '../features/devices/deviceControl';
+import {
+  getCommandFailureMessage,
+  getControlBlockedMessage,
+} from '../features/devices/deviceControlMessages';
+import {createEmptyRuntime} from '../features/devices/deviceRuntime';
 import {
   lightScreenBackground,
   lightScreenBackgroundColor,
@@ -56,7 +67,9 @@ function MainTab() {
     'fan' | 'water' | null
   >(null);
   const [isSprayCycleOpen, setIsSprayCycleOpen] = useState(false);
-  const [sprayCycleMinutes, setSprayCycleMinutes] = useState(120);
+  const [pendingSprayCycleDeviceId, setPendingSprayCycleDeviceId] = useState<
+    string | null
+  >(null);
   const [activeDeviceIndex, setActiveDeviceIndex] = useState(0);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const {clearNotifications, dismissNotification, notifications} =
@@ -77,6 +90,9 @@ function MainTab() {
 
   const carouselWidth = Math.max(screenWidth - 44, 280);
   const activeDevice = devices[activeDeviceIndex];
+  const activeSprayCycleMinutes = activeDevice
+    ? getSprayCycleMinutes(activeDevice.runtime)
+    : 120;
   const controlReadyCount = useMemo(
     () => devices.filter(isDeviceControlReady).length,
     [devices],
@@ -147,6 +163,56 @@ function MainTab() {
     setActiveDeviceIndex(
       Math.min(Math.max(nextIndex, 0), Math.max(devices.length - 1, 0)),
     );
+  };
+
+  const applySprayCycle = async (minutes: number) => {
+    if (!activeDevice || pendingSprayCycleDeviceId) {
+      return;
+    }
+
+    const blockReason = getDeviceControlBlockReason(activeDevice);
+
+    if (blockReason) {
+      Alert.alert('기기 제어 불가', getControlBlockedMessage(blockReason));
+      return;
+    }
+
+    setPendingSprayCycleDeviceId(activeDevice.id);
+
+    try {
+      await sendDeviceSprayCycleCommand({device: activeDevice, minutes});
+      const autoCycleMs = minutes * 60 * 1000;
+      const now = Date.now();
+
+      updateDevice(activeDevice.id, current => ({
+        ...current,
+        status: 'online',
+        runtime: {
+          ...(current.runtime ?? createEmptyRuntime()),
+          autoCycleMs,
+          autoState: 'idle',
+          autoRunning: false,
+          autoNextRunInMs:
+            current.controls.power && current.controls.running
+              ? autoCycleMs
+              : current.runtime?.autoNextRunInMs ?? 0,
+          lastSeenAt: now,
+        },
+      }));
+      setIsSprayCycleOpen(false);
+      Alert.alert(
+        '분사 주기',
+        `${formatSprayCycleLabel(minutes)} 주기로 변경했습니다.`,
+      );
+    } catch (error) {
+      Alert.alert('분사 주기 변경 실패', getCommandFailureMessage(error));
+      updateDevice(activeDevice.id, current => ({
+        ...current,
+        status: 'offline',
+      }));
+    } finally {
+      setPendingSprayCycleDeviceId(null);
+    }
   };
 
   return (
@@ -319,14 +385,9 @@ function MainTab() {
       <SprayCycleModal
         onClose={() => setIsSprayCycleOpen(false)}
         onSelect={minutes => {
-          setSprayCycleMinutes(minutes);
-          setIsSprayCycleOpen(false);
-          Alert.alert(
-            '분사 주기',
-            '분사 주기를 선택했습니다. 실제 기기 주기 변경은 펌웨어 연동 후 적용됩니다.',
-          );
+          void applySprayCycle(minutes);
         }}
-        selectedMinutes={sprayCycleMinutes}
+        selectedMinutes={activeSprayCycleMinutes}
         visible={isSprayCycleOpen}
       />
       <NotificationsModal

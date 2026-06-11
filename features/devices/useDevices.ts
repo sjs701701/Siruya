@@ -136,6 +136,9 @@ function readLegacyRuntime(value: unknown): Device['runtime'] {
       typeof value.autoRunning === 'boolean'
         ? value.autoRunning
         : defaultRuntime.autoRunning,
+    autoCycleMs: isFiniteNumber(value.autoCycleMs)
+      ? value.autoCycleMs
+      : defaultRuntime.autoCycleMs,
     autoNextRunInMs: isFiniteNumber(value.autoNextRunInMs)
       ? value.autoNextRunInMs
       : defaultRuntime.autoNextRunInMs,
@@ -374,6 +377,7 @@ function areDeviceRuntimesEqual(
   return (
     currentRuntime.autoState === nextRuntime.autoState &&
     currentRuntime.autoRunning === nextRuntime.autoRunning &&
+    currentRuntime.autoCycleMs === nextRuntime.autoCycleMs &&
     currentRuntime.autoNextRunInMs === nextRuntime.autoNextRunInMs &&
     currentRuntime.interlockOk === nextRuntime.interlockOk &&
     currentRuntime.fanRunLeftMs === nextRuntime.fanRunLeftMs &&
@@ -479,6 +483,7 @@ function applyStatusSnapshot(
   const runtime = stabilizeRuntimeAnchor(device.runtime, {
     autoState: snapshot.autoState,
     autoRunning: snapshot.autoRunning,
+    autoCycleMs: snapshot.autoCycleMs ?? device.runtime?.autoCycleMs,
     autoNextRunInMs: readFiniteNumber(snapshot.autoNextRunInMs),
     interlockOk: snapshot.interlockOk,
     fanRunLeftMs: readFiniteNumber(snapshot.fanRunLeftMs),
@@ -536,6 +541,13 @@ function snapshotFromWsState(state: DeviceWsState): DeviceStatusSnapshot {
     fan: Boolean(state.fan_on),
     autoState,
     autoRunning,
+    autoCycleMs:
+      isFiniteNumber(state.auto_cycle_ms) && state.auto_cycle_ms > 0
+        ? state.auto_cycle_ms
+        : isFiniteNumber(state.auto_cycle_minutes) &&
+            state.auto_cycle_minutes > 0
+          ? state.auto_cycle_minutes * 60 * 1000
+          : undefined,
     autoNextRunInMs: readFiniteNumber(state.auto_next_run_in_ms),
     interlockOk: Boolean(state.interlock_ok),
     fanRunLeftMs: readFiniteNumber(state.fan_run_left_ms),

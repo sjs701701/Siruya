@@ -11,7 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import {sendDeviceCommand} from './deviceCommands';
+import {sendDeviceCommand, sendDeviceSprayCycleCommand} from './deviceCommands';
 import {
   getDeviceControlBlockReason,
   isDeviceControlReady,
@@ -22,6 +22,7 @@ import {
 } from './deviceControlMessages';
 import {getDeviceStatusLabel} from './deviceStatusLabel';
 import {getProductDefinition} from './deviceRegistry';
+import {createEmptyRuntime} from './deviceRuntime';
 import {getGrowthProgress, GROWTH_CYCLE_DAYS} from './growthProgress';
 import HapticPressable, {triggerToggleHaptic} from './HapticPressable';
 import OdometerWheel, {
@@ -29,7 +30,11 @@ import OdometerWheel, {
   ODOMETER_WHEEL_VISIBLE_ITEMS,
 } from './OdometerWheel';
 import {getProductImageSource} from './productAssets';
-import {formatDuration, getNextSprayText} from './runtimeDisplay';
+import {
+  DEFAULT_WATER_AUTO_CYCLE_MS,
+  formatDuration,
+  getNextSprayText,
+} from './runtimeDisplay';
 import {Device, DeviceCommand, DeviceRuntime, DeviceUpdater} from './types';
 
 const CLEAN_MODE_DURATION_MS = 60 * 1000;
@@ -40,6 +45,8 @@ const SPRAY_HOUR_VALUES = Array.from({length: 7}, (_, hour) => String(hour));
 const SPRAY_MINUTE_VALUES = Array.from({length: 60}, (_, minute) =>
   String(minute).padStart(2, '0'),
 );
+
+type PendingCommand = DeviceCommand | 'sprayCycle';
 
 type Props = {
   device: Device | null;
@@ -89,7 +96,7 @@ function clampDateToToday(date: Date) {
   return date.getTime() > today.getTime() ? today : date;
 }
 
-function formatSprayCycleLabel(minutes: number) {
+export function formatSprayCycleLabel(minutes: number) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
 
@@ -106,19 +113,27 @@ function formatSprayCycleLabel(minutes: number) {
 
 function normalizeSprayCycleMinutes(hours: number, minutes: number) {
   const totalMinutes = hours * 60 + minutes;
+  return normalizeSprayCycleTotalMinutes(totalMinutes);
+}
+
+function normalizeSprayCycleTotalMinutes(totalMinutes: number) {
   return Math.min(
     MAX_SPRAY_CYCLE_MINUTES,
     Math.max(MIN_SPRAY_CYCLE_MINUTES, totalMinutes),
   );
 }
 
+export function getSprayCycleMinutes(runtime: DeviceRuntime | undefined) {
+  const cycleMs = runtime?.autoCycleMs ?? DEFAULT_WATER_AUTO_CYCLE_MS;
+  return normalizeSprayCycleTotalMinutes(Math.round(cycleMs / 60000));
+}
+
 function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
-  const [pendingCommand, setPendingCommand] = useState<DeviceCommand | null>(
+  const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(
     null,
   );
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isSprayCycleOpen, setIsSprayCycleOpen] = useState(false);
-  const [sprayCycleMinutes, setSprayCycleMinutes] = useState(120);
   const [cleanTimerEndsAt, setCleanTimerEndsAt] = useState<number | null>(null);
   const [cleanTimerNow, setCleanTimerNow] = useState(Date.now());
 
@@ -166,6 +181,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
   const cleanRemainingMs = cleanTimerEndsAt
     ? Math.max(cleanTimerEndsAt - cleanTimerNow, 0)
     : 0;
+  const sprayCycleMinutes = getSprayCycleMinutes(device.runtime);
 
   const setGrowthStartedAt = (growthStartedAt: number) => {
     onUpdate(device.id, current => ({
@@ -249,6 +265,57 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
     const now = Date.now();
     setCleanTimerNow(now);
     setCleanTimerEndsAt(now + CLEAN_MODE_DURATION_MS);
+  };
+
+  const applySprayCycle = async (minutes: number) => {
+    if (pendingCommand) {
+      return;
+    }
+
+    const blockReason = getDeviceControlBlockReason(device);
+
+    if (blockReason) {
+      Alert.alert('기기 제어 불가', getControlBlockedMessage(blockReason));
+      return;
+    }
+
+    setPendingCommand('sprayCycle');
+
+    try {
+      await sendDeviceSprayCycleCommand({device, minutes});
+      const autoCycleMs = minutes * 60 * 1000;
+      const now = Date.now();
+
+      triggerToggleHaptic(true);
+      onUpdate(device.id, current => ({
+        ...current,
+        status: 'online',
+        runtime: {
+          ...(current.runtime ?? createEmptyRuntime()),
+          autoCycleMs,
+          autoState: 'idle',
+          autoRunning: false,
+          autoNextRunInMs:
+            current.controls.power && current.controls.running
+              ? autoCycleMs
+              : current.runtime?.autoNextRunInMs ?? 0,
+          lastSeenAt: now,
+        },
+      }));
+      setIsSprayCycleOpen(false);
+      Alert.alert(
+        '분사 주기',
+        `${formatSprayCycleLabel(minutes)} 주기로 변경했습니다.`,
+      );
+    } catch (error) {
+      Alert.alert('분사 주기 변경 실패', getCommandFailureMessage(error));
+      onUpdate(device.id, current => ({
+        ...current,
+        status: 'offline',
+      }));
+    } finally {
+      setPendingCommand(null);
+    }
   };
 
   const handleCleanPress = async () => {
@@ -507,12 +574,7 @@ function DeviceDetailModal({device, onClose, onUpdate, onRemove}: Props) {
         <SprayCycleModal
           onClose={() => setIsSprayCycleOpen(false)}
           onSelect={minutes => {
-            setSprayCycleMinutes(minutes);
-            setIsSprayCycleOpen(false);
-            Alert.alert(
-              '분사 주기',
-              `${formatSprayCycleLabel(minutes)} 주기를 선택했습니다. 실제 기기 주기 변경은 펌웨어 연동 후 적용됩니다.`,
-            );
+            void applySprayCycle(minutes);
           }}
           selectedMinutes={sprayCycleMinutes}
           visible={isSprayCycleOpen}

@@ -27,6 +27,8 @@ type Esp32StatusResponse = {
   fan_on?: boolean;
   fan_run_left_ms?: number;
   auto_state?: number;
+  auto_cycle_ms?: number;
+  auto_cycle_minutes?: number;
   auto_next_run_in_ms?: number;
   auto_immediate_pending?: boolean;
   firmware_version?: string;
@@ -37,9 +39,9 @@ type Esp32StatusResponse = {
 };
 
 function createCommandPayload(params: {
-  command: DeviceCommand | 'firmwareUpdate';
+  command: DeviceCommand | 'firmwareUpdate' | 'sprayCycle';
   device: Device;
-  value: boolean;
+  value: boolean | number;
 }) {
   return {
     command: params.command,
@@ -57,6 +59,7 @@ export type DeviceStatusSnapshot = {
   fan: boolean;
   autoState: DeviceAutoState;
   autoRunning: boolean;
+  autoCycleMs?: number;
   autoNextRunInMs: number;
   interlockOk: boolean;
   fanRunLeftMs: number;
@@ -98,8 +101,8 @@ function shouldUseWebSocketOnly(device: Device) {
 
 async function sendLocalDeviceCommand(params: {
   device: Device;
-  command: DeviceCommand | 'firmwareUpdate';
-  value: boolean;
+  command: DeviceCommand | 'firmwareUpdate' | 'sprayCycle';
+  value: boolean | number;
 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
@@ -168,6 +171,7 @@ export async function fetchDeviceStatus(
       fan: device.controls.fan,
       autoState: device.runtime?.autoState ?? 'idle',
       autoRunning: Boolean(device.runtime?.autoRunning),
+      autoCycleMs: device.runtime?.autoCycleMs,
       autoNextRunInMs: device.runtime?.autoNextRunInMs ?? 0,
       interlockOk: device.runtime?.interlockOk ?? true,
       fanRunLeftMs: device.runtime?.fanRunLeftMs ?? 0,
@@ -200,6 +204,16 @@ export async function fetchDeviceStatus(
       autoState === 'watering';
 
     const powerControlSupported = typeof data.power_enabled === 'boolean';
+    const autoCycleMs =
+      typeof data.auto_cycle_ms === 'number' &&
+      Number.isFinite(data.auto_cycle_ms) &&
+      data.auto_cycle_ms > 0
+        ? data.auto_cycle_ms
+        : typeof data.auto_cycle_minutes === 'number' &&
+            Number.isFinite(data.auto_cycle_minutes) &&
+            data.auto_cycle_minutes > 0
+          ? data.auto_cycle_minutes * 60 * 1000
+          : undefined;
 
     return {
       online: Boolean(data.sta_connected),
@@ -210,6 +224,7 @@ export async function fetchDeviceStatus(
       fan: Boolean(data.fan_on),
       autoState,
       autoRunning,
+      autoCycleMs,
       autoNextRunInMs: Number(data.auto_next_run_in_ms ?? 0),
       interlockOk: Boolean(data.interlock_ok),
       fanRunLeftMs: Number(data.fan_run_left_ms ?? 0),
@@ -254,6 +269,46 @@ export async function sendFirmwareUpdateCommand(device: Device) {
         device,
         command: 'firmwareUpdate',
         value: true,
+      });
+    } catch {
+      throw error;
+    }
+
+    return {ok: true};
+  }
+}
+
+export async function sendDeviceSprayCycleCommand(params: {
+  device: Device;
+  minutes: number;
+}) {
+  if (params.device.isDemo) {
+    return {ok: true, message: 'DEMO_SPRAY_CYCLE_OK'};
+  }
+
+  ensureDeviceCommandRoute(params.device);
+
+  if (shouldUseWebSocketOnly(params.device)) {
+    await sendWebSocketDeviceCommand({
+      device: params.device,
+      command: 'sprayCycle',
+      value: params.minutes,
+    });
+    return {ok: true};
+  }
+
+  try {
+    return await sendLocalDeviceCommand({
+      command: 'sprayCycle',
+      device: params.device,
+      value: params.minutes,
+    });
+  } catch (error) {
+    try {
+      await sendWebSocketDeviceCommand({
+        device: params.device,
+        command: 'sprayCycle',
+        value: params.minutes,
       });
     } catch {
       throw error;

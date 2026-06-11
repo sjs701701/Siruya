@@ -5,6 +5,7 @@ jest.mock('../deviceWebSocket', () => ({
 import {
   fetchDeviceStatus,
   sendDeviceCommand,
+  sendDeviceSprayCycleCommand,
   sendFirmwareUpdateCommand,
 } from '../deviceCommands';
 import {sendWebSocketDeviceCommand} from '../deviceWebSocket';
@@ -112,6 +113,24 @@ describe('deviceCommands', () => {
     );
   });
 
+  it('sends spray cycle minutes through the authenticated command route', async () => {
+    await sendDeviceSprayCycleCommand({
+      device: createDevice(),
+      minutes: 45,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://192.168.0.10/command',
+      expect.objectContaining({
+        body: JSON.stringify({
+          command: 'sprayCycle',
+          token: 'command-token-1',
+          value: 45,
+        }),
+      }),
+    );
+  });
+
   it('uses the local command route before websocket for hardware devices', async () => {
     await sendDeviceCommand({
       device: createDevice({hardwareId: 'HW-1'}),
@@ -204,6 +223,7 @@ describe('deviceCommands', () => {
             pump_on: false,
             fan_on: true,
             auto_state: 0,
+            auto_cycle_ms: 2700000,
             auto_next_run_in_ms: 120000,
             fan_run_left_ms: 30000,
             firmware_version: '1.0.8',
@@ -219,6 +239,7 @@ describe('deviceCommands', () => {
       powerControlSupported: true,
       running: true,
       fan: true,
+      autoCycleMs: 2700000,
       firmwareVersion: '1.0.8',
     });
   });
