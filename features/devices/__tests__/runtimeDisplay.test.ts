@@ -94,10 +94,10 @@ describe('getWaterCycleProgress', () => {
     expect(nearEnd).toBeCloseTo(0.95, 2);
   });
 
-  it('keeps a small visible arc right after a cycle restarts', () => {
+  it('starts empty right after a cycle restarts', () => {
     const runtime = makeRuntime();
 
-    expect(getWaterCycleProgress(runtime, BASE_NOW)).toBeGreaterThan(0);
+    expect(getWaterCycleProgress(runtime, BASE_NOW)).toBe(0);
   });
 
   it('never moves backwards from countdown end through preparing to watering', () => {

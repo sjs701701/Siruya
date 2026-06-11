@@ -76,3 +76,7 @@ arduino/**/secrets.h
 /siruya-*.png
 /*.zip
 /.tools/
+/metro-*.log
+/dist/
+*.idsig
+/.secret-scan-*/

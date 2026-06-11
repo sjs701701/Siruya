@@ -89,6 +89,7 @@ function readFiniteNumber(value: unknown, fallback = 0) {
 
 function createDefaultControls(): Device['controls'] {
   return {
+    power: false,
     running: false,
     water: false,
     fan: false,
@@ -104,6 +105,8 @@ function readLegacyControls(value: unknown): Device['controls'] {
   }
 
   return {
+    power:
+      typeof value.power === 'boolean' ? value.power : defaultControls.power,
     running:
       typeof value.running === 'boolean'
         ? value.running
@@ -162,6 +165,10 @@ function readLegacyRuntime(value: unknown): Device['runtime'] {
     firmwareUpdateProgress: isFiniteNumber(value.firmwareUpdateProgress)
       ? value.firmwareUpdateProgress
       : undefined,
+    powerControlSupported:
+      typeof value.powerControlSupported === 'boolean'
+        ? value.powerControlSupported
+        : undefined,
     lastSeenAt: readOptionalTimestamp(value.lastSeenAt),
   };
 }
@@ -377,6 +384,7 @@ function areDeviceRuntimesEqual(
       nextRuntime.firmwareUpdateStatus &&
     currentRuntime.firmwareUpdateProgress ===
       nextRuntime.firmwareUpdateProgress &&
+    currentRuntime.powerControlSupported === nextRuntime.powerControlSupported &&
     currentRuntime.lastSeenAt === nextRuntime.lastSeenAt
   );
 }
@@ -398,9 +406,10 @@ function stabilizeRuntimeAnchor(
 
 function mergeDeviceControls(
   currentControls: Device['controls'],
-  nextControls: Pick<Device['controls'], 'running' | 'water' | 'fan'>,
+  nextControls: Pick<Device['controls'], 'power' | 'running' | 'water' | 'fan'>,
 ) {
   if (
+    currentControls.power === nextControls.power &&
     currentControls.running === nextControls.running &&
     currentControls.water === nextControls.water &&
     currentControls.fan === nextControls.fan
@@ -410,6 +419,7 @@ function mergeDeviceControls(
 
   return {
     ...currentControls,
+    power: nextControls.power,
     running: nextControls.running,
     water: nextControls.water,
     fan: nextControls.fan,
@@ -461,6 +471,7 @@ function applyStatusSnapshot(
     : snapshotFirmwareUpdateProgress;
   const status = snapshot.online ? 'online' : 'offline';
   const controls = mergeDeviceControls(device.controls, {
+    power: snapshot.power ?? device.controls.power,
     running: snapshot.running,
     water: snapshot.water,
     fan: snapshot.fan,
@@ -475,6 +486,7 @@ function applyStatusSnapshot(
     latestFirmwareVersion,
     firmwareUpdateStatus,
     firmwareUpdateProgress,
+    powerControlSupported: snapshot.powerControlSupported,
     lastSeenAt: now,
   });
 
@@ -514,6 +526,11 @@ function snapshotFromWsState(state: DeviceWsState): DeviceStatusSnapshot {
 
   return {
     online: Boolean(state.sta_connected),
+    power:
+      typeof state.power_enabled === 'boolean'
+        ? Boolean(state.power_enabled)
+        : undefined,
+    powerControlSupported: typeof state.power_enabled === 'boolean',
     running: Boolean(state.system_enabled),
     water: Boolean(state.pump_on),
     fan: Boolean(state.fan_on),
@@ -576,6 +593,7 @@ export function mergePolledDeviceStatuses(
     }
 
     const controls = mergeDeviceControls(device.controls, {
+      power: refreshedDevice.controls.power,
       running: refreshedDevice.controls.running,
       water: refreshedDevice.controls.water,
       fan: refreshedDevice.controls.fan,

@@ -15,11 +15,15 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import Video, {ResizeMode} from 'react-native-video';
 import AddDeviceModal from '../features/devices/AddDeviceModal';
 import AirFlowEffect from '../features/devices/AirFlowEffect';
+import ControlActionModal from '../features/devices/ControlActionModal';
 import DeviceActionButton from '../features/devices/DeviceActionButton';
-import DeviceDetailModal from '../features/devices/DeviceDetailModal';
+import DeviceDetailModal, {
+  SprayCycleModal,
+} from '../features/devices/DeviceDetailModal';
 import WaterSupplyGauge from '../features/devices/WaterSupplyGauge';
 import {getProductDefinition} from '../features/devices/deviceRegistry';
 import {getDeviceStatusLabel} from '../features/devices/deviceStatusLabel';
+import {isDeviceControlReady} from '../features/devices/deviceControl';
 import {
   lightScreenBackground,
   lightScreenBackgroundColor,
@@ -29,12 +33,14 @@ import {
   getGrowthProgress,
 } from '../features/devices/growthProgress';
 import HapticPressable from '../features/devices/HapticPressable';
+import NotificationsModal from '../features/devices/NotificationsModal';
+import {useNotifications} from '../features/devices/notifications';
 import {getProductImageSource} from '../features/devices/productAssets';
 import {
   getNextSprayText,
   getWaterCycleProgress,
 } from '../features/devices/runtimeDisplay';
-import {Device, DeviceStatus} from '../features/devices/types';
+import {Device} from '../features/devices/types';
 import {useDevices} from '../features/devices/useDevices';
 
 const LIGHT_CARD_COLOR = '#dfe1e3';
@@ -46,11 +52,19 @@ function MainTab() {
   const carouselRef = useRef<ScrollView>(null);
   const {width: screenWidth} = useWindowDimensions();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [controlModalCommand, setControlModalCommand] = useState<
+    'fan' | 'water' | null
+  >(null);
+  const [isSprayCycleOpen, setIsSprayCycleOpen] = useState(false);
+  const [sprayCycleMinutes, setSprayCycleMinutes] = useState(120);
   const [activeDeviceIndex, setActiveDeviceIndex] = useState(0);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const {clearNotifications, dismissNotification, notifications} =
+    useNotifications();
+  const hasNotifications = notifications.length > 0;
   const {
     devices,
     selectedDevice,
-    onlineCount,
     addDevice,
     updateDevice,
     removeDevice,
@@ -61,8 +75,12 @@ function MainTab() {
     retryPersistDevices,
   } = useDevices();
 
-  const carouselWidth = Math.max(screenWidth - 54, 280);
+  const carouselWidth = Math.max(screenWidth - 44, 280);
   const activeDevice = devices[activeDeviceIndex];
+  const controlReadyCount = useMemo(
+    () => devices.filter(isDeviceControlReady).length,
+    [devices],
+  );
   const storageNotice = useMemo(() => {
     if (loadState.status === 'error') {
       return {
@@ -141,22 +159,24 @@ function MainTab() {
         <View>
           <Text style={styles.homeLabel}>시루야</Text>
           <Text style={styles.headerSub}>
-            연결됨 {onlineCount}대 전체 {devices.length}대
+            연결됨 {controlReadyCount}대 전체 {devices.length}대
           </Text>
         </View>
         <View style={styles.headerActions}>
           <DeviceActionButton
-            accessibilityLabel="알림"
+            accessibilityLabel={
+              hasNotifications ? `알림 ${notifications.length}개` : '알림'
+            }
             style={styles.notificationButton}
             contentStyle={styles.notificationButtonContent}
-            onPress={() => Alert.alert('알림', '새 알림이 없습니다.')}>
+            onPress={() => setIsNotificationsOpen(true)}>
             <View style={styles.iconWrap}>
               <Image
                 source={require('../assets/images/main_bell_icon.png')}
                 resizeMode="contain"
                 style={styles.notificationIcon}
               />
-              <View style={styles.notificationBadge} />
+              {hasNotifications && <View style={styles.notificationBadge} />}
             </View>
           </DeviceActionButton>
         </View>
@@ -229,12 +249,16 @@ function MainTab() {
             )}
 
             <View style={[styles.metricGrid, {width: carouselWidth}]}>
-              <WaterCycleMetricCard device={activeDevice} />
+              <WaterCycleMetricCard
+                device={activeDevice}
+                onPress={() => setIsSprayCycleOpen(true)}
+              />
 
               <View style={styles.sideMetricColumn}>
                 <ControlStatusCard
                   active={activeDevice.controls.fan}
                   effect="airflow"
+                  onPress={() => setControlModalCommand('fan')}
                   title="팬 작동"
                   tone="dark"
                 />
@@ -243,6 +267,7 @@ function MainTab() {
                     FORCE_WATER_SUPPLY_CARD_ACTIVE || activeDevice.controls.water
                   }
                   effect="waterVideo"
+                  onPress={() => setControlModalCommand('water')}
                   title="물 공급"
                   tone="light"
                 />
@@ -284,6 +309,33 @@ function MainTab() {
         onUpdate={updateDevice}
         onRemove={removeDevice}
       />
+      <ControlActionModal
+        command={controlModalCommand}
+        device={activeDevice ?? null}
+        onClose={() => setControlModalCommand(null)}
+        onUpdate={updateDevice}
+        visible={Boolean(controlModalCommand && activeDevice)}
+      />
+      <SprayCycleModal
+        onClose={() => setIsSprayCycleOpen(false)}
+        onSelect={minutes => {
+          setSprayCycleMinutes(minutes);
+          setIsSprayCycleOpen(false);
+          Alert.alert(
+            '분사 주기',
+            '분사 주기를 선택했습니다. 실제 기기 주기 변경은 펌웨어 연동 후 적용됩니다.',
+          );
+        }}
+        selectedMinutes={sprayCycleMinutes}
+        visible={isSprayCycleOpen}
+      />
+      <NotificationsModal
+        notifications={notifications}
+        onClearAll={clearNotifications}
+        onClose={() => setIsNotificationsOpen(false)}
+        onDismiss={dismissNotification}
+        visible={isNotificationsOpen}
+      />
     </SafeAreaView>
   );
 }
@@ -306,56 +358,70 @@ function DeviceHeroSlide({
       onPress={onPress}
       style={[styles.heroSlide, {width}]}>
       <View style={styles.heroCard}>
-        <View style={styles.heroCopy}>
-          <Text style={styles.heroRoom} numberOfLines={1}>
-            {device.room}
-          </Text>
-          <Text style={styles.heroName} numberOfLines={1}>
-            {device.name}
-          </Text>
-        </View>
-        <DeviceStatusBadge status={device.status} />
-        <View style={styles.heroImageStage}>
-          {productImage ? (
-            <Image
-              source={productImage}
-              resizeMode="contain"
-              style={styles.heroProductImage}
-            />
-          ) : (
-            <View style={styles.productImageFallback}>
-              <Text style={styles.productImageFallbackText}>
-                {product.badge}
-              </Text>
-            </View>
-          )}
+        <View style={styles.heroCardSurface}>
+          <View pointerEvents="none" style={styles.heroCardGradient} />
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroRoom} numberOfLines={1}>
+              {device.room}
+            </Text>
+            <Text style={styles.heroName} numberOfLines={1}>
+              {device.name}
+            </Text>
+          </View>
+          <DeviceStatusBadge device={device} />
+          <View style={styles.heroImageStage}>
+            {productImage ? (
+              <Image
+                source={productImage}
+                resizeMode="contain"
+                style={styles.heroProductImage}
+              />
+            ) : (
+              <View style={styles.productImageFallback}>
+                <Text style={styles.productImageFallbackText}>
+                  {product.badge}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
       </View>
     </HapticPressable>
   );
 }
 
-function DeviceStatusBadge({status}: {status: DeviceStatus}) {
-  const isOnline = status === 'online';
+function DeviceStatusBadge({device}: {device: Device}) {
+  const isControlReady = isDeviceControlReady(device);
+  const label = isControlReady
+    ? getDeviceStatusLabel('online')
+    : getDeviceStatusLabel(device.status === 'setup' ? 'setup' : 'offline');
 
   return (
     <View
       style={[
         styles.statusBadge,
-        isOnline ? styles.statusBadgeOnline : styles.statusBadgeMuted,
+        isControlReady ? styles.statusBadgeOnline : styles.statusBadgeMuted,
       ]}>
       <Text
         style={[
           styles.statusBadgeText,
-          isOnline ? styles.statusBadgeTextOnline : styles.statusBadgeTextMuted,
+          isControlReady
+            ? styles.statusBadgeTextOnline
+            : styles.statusBadgeTextMuted,
         ]}>
-        {getDeviceStatusLabel(status)}
+        {label}
       </Text>
     </View>
   );
 }
 
-function WaterCycleMetricCard({device}: {device: Device}) {
+function WaterCycleMetricCard({
+  device,
+  onPress,
+}: {
+  device: Device;
+  onPress: () => void;
+}) {
   const [now, setNow] = useState(Date.now());
   const nextSprayText = useMemo(
     () => getNextSprayText(device.runtime, now),
@@ -372,7 +438,11 @@ function WaterCycleMetricCard({device}: {device: Device}) {
   }, []);
 
   return (
-    <View style={[styles.metricCard, styles.waterCycleCard]}>
+    <HapticPressable
+      accessibilityLabel="물 공급주기 설정 열기"
+      accessibilityRole="button"
+      onPress={onPress}
+      style={[styles.metricCard, styles.waterCycleCard]}>
       <Text style={styles.metricTitle}>물 공급주기</Text>
       <View style={styles.waterGaugeSlot}>
         <WaterSupplyGauge
@@ -381,7 +451,7 @@ function WaterCycleMetricCard({device}: {device: Device}) {
           value={nextSprayText}
         />
       </View>
-    </View>
+    </HapticPressable>
   );
 }
 
@@ -390,6 +460,8 @@ function GrowthProgressCard({device, width}: {device: Device; width: number}) {
     () => getGrowthProgress(device.growthStartedAt),
     [device.growthStartedAt],
   );
+  const showGrowthSoftEdge =
+    growth.progressPercent > 0 && growth.progressPercent < 100;
 
   return (
     <View style={[styles.growthCard, {width}]}>
@@ -403,8 +475,9 @@ function GrowthProgressCard({device, width}: {device: Device; width: number}) {
           style={[
             styles.growthFill,
             {width: `${growth.progressPercent}%`},
-          ]}
-        />
+          ]}>
+          {showGrowthSoftEdge && <View style={styles.growthFillSoftEdge} />}
+        </View>
       </View>
     </View>
   );
@@ -413,11 +486,13 @@ function GrowthProgressCard({device, width}: {device: Device; width: number}) {
 function ControlStatusCard({
   active,
   effect,
+  onPress,
   title,
   tone,
 }: {
   active: boolean;
   effect?: 'airflow' | 'waterVideo';
+  onPress?: () => void;
   title: string;
   tone: 'dark' | 'light';
 }) {
@@ -425,7 +500,10 @@ function ControlStatusCard({
   const isImageBacked = effect === 'waterVideo';
 
   return (
-    <View
+    <HapticPressable
+      accessibilityLabel={`${title} 제어 열기`}
+      accessibilityRole="button"
+      onPress={onPress}
       style={[
         styles.controlCard,
         isDark ? styles.controlCardDark : styles.controlCardLight,
@@ -435,10 +513,7 @@ function ControlStatusCard({
           <Image
             resizeMode="cover"
             source={WATER_SUPPLY_CARD_BACKGROUND}
-            style={[
-              styles.waterSupplyImage,
-              !active && styles.waterSupplyInactiveMedia,
-            ]}
+            style={styles.waterSupplyImage}
           />
           <Video
             controls={false}
@@ -447,12 +522,14 @@ function ControlStatusCard({
             repeat
             resizeMode={ResizeMode.COVER}
             source={WATER_SUPPLY_VIDEO_SOURCE}
+            style={styles.waterSupplyVideo}
+          />
+          <View
             style={[
-              styles.waterSupplyVideo,
-              !active && styles.waterSupplyInactiveMedia,
+              styles.waterSupplyImageOverlay,
+              !active && styles.waterSupplyInactiveOverlay,
             ]}
           />
-          <View style={styles.waterSupplyImageOverlay} />
         </>
       )}
       {effect === 'airflow' && (
@@ -469,7 +546,7 @@ function ControlStatusCard({
         </Text>
         <ControlStatusBadge active={active} />
       </View>
-    </View>
+    </HapticPressable>
   );
 }
 
@@ -512,7 +589,7 @@ const styles = StyleSheet.create({
   headerSub: {
     color: '#9ca3af',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     marginTop: 4,
   },
   headerActions: {
@@ -537,12 +614,12 @@ const styles = StyleSheet.create({
   storageNoticeTitle: {
     color: '#111827',
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   storageNoticeMessage: {
     color: '#6b7280',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '500',
     lineHeight: 15,
   },
   storageNoticeButton: {
@@ -556,7 +633,7 @@ const styles = StyleSheet.create({
   storageNoticeButtonText: {
     color: '#ffffff',
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   notificationButton: {
     borderRadius: 23,
@@ -634,13 +711,16 @@ const styles = StyleSheet.create({
   },
   deviceCarousel: {
     alignSelf: 'center',
+    borderRadius: 20,
     flexGrow: 0,
+    overflow: 'hidden',
   },
   heroSlide: {
+    borderRadius: 20,
+    overflow: 'hidden',
     paddingHorizontal: 0,
   },
   heroCard: {
-    backgroundColor: '#1e1e1e',
     borderRadius: 20,
     boxShadow: [
       {
@@ -651,12 +731,27 @@ const styles = StyleSheet.create({
         spreadDistance: -10,
       },
     ],
-    experimental_backgroundImage:
-      'linear-gradient(to bottom right, #1e1e1e, #525252)',
     height: 286,
+    position: 'relative',
+    width: '100%',
+  },
+  heroCardSurface: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 20,
+    flex: 1,
     overflow: 'hidden',
     position: 'relative',
     width: '100%',
+  },
+  heroCardGradient: {
+    backgroundColor: '#1e1e1e',
+    bottom: 0,
+    experimental_backgroundImage:
+      'linear-gradient(to bottom right, #1e1e1e, #525252)',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
   },
   heroCopy: {
     left: 16,
@@ -668,13 +763,13 @@ const styles = StyleSheet.create({
   heroRoom: {
     color: '#ffffff',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '500',
     opacity: 0.9,
   },
   heroName: {
     color: '#ffffff',
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '800',
     letterSpacing: 0,
     marginTop: 4,
   },
@@ -701,7 +796,7 @@ const styles = StyleSheet.create({
   productImageFallbackText: {
     color: '#ffffff',
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   statusBadge: {
     borderRadius: 999,
@@ -720,7 +815,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '700',
     lineHeight: 12,
   },
   statusBadgeTextOnline: {
@@ -773,7 +868,7 @@ const styles = StyleSheet.create({
   metricTitle: {
     color: '#111827',
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 0,
   },
   metricTitleOnDark: {
@@ -853,10 +948,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 0,
     top: 0,
-    zIndex: 1,
+    zIndex: 0,
   },
   waterSupplyImageOverlay: {
-    backgroundColor: 'rgba(5, 12, 8, 0.22)',
+    backgroundColor: 'transparent',
     bottom: 0,
     left: 0,
     position: 'absolute',
@@ -864,9 +959,8 @@ const styles = StyleSheet.create({
     top: 0,
     zIndex: 1,
   },
-  waterSupplyInactiveMedia: {
-    filter: [{blur: 3}],
-    transform: [{scale: 1.03}],
+  waterSupplyInactiveOverlay: {
+    backgroundColor: 'rgba(5, 12, 8, 0.22)',
   },
   controlStatusBadge: {
     borderRadius: 999,
@@ -882,7 +976,7 @@ const styles = StyleSheet.create({
   },
   controlStatusText: {
     fontSize: 9,
-    fontWeight: '900',
+    fontWeight: '700',
     lineHeight: 11,
     textAlign: 'center',
   },
@@ -916,19 +1010,33 @@ const styles = StyleSheet.create({
   growthLabel: {
     color: '#4b5563',
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '500',
   },
   growthTrack: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#FCFFF2',
     borderRadius: 999,
     height: 18,
     marginTop: 5,
     overflow: 'hidden',
   },
   growthFill: {
-    backgroundColor: '#73ff35',
+    backgroundColor: '#67ff67',
     borderRadius: 999,
+    experimental_backgroundImage:
+      'linear-gradient(to right, #67ff67, #e6ff57)',
     height: '100%',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  growthFillSoftEdge: {
+    backgroundColor: 'rgba(252,255,242,0)',
+    bottom: 0,
+    experimental_backgroundImage:
+      'linear-gradient(to right, rgba(252,255,242,0), rgba(252,255,242,1))',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 20,
   },
   emptyHome: {
     alignItems: 'center',
@@ -939,7 +1047,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: '#111827',
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '800',
     textAlign: 'center',
   },
   emptyText: {
@@ -964,13 +1072,13 @@ const styles = StyleSheet.create({
   addDeviceIcon: {
     color: '#323232',
     fontSize: 24,
-    fontWeight: '900',
+    fontWeight: '700',
     lineHeight: 26,
   },
   addDeviceText: {
     color: '#323232',
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '700',
   },
 });
 

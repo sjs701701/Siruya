@@ -13,7 +13,7 @@
 #include <math.h>
 #include "secrets.h"
 
-#define FIRMWARE_VERSION "1.0.7"
+#define FIRMWARE_VERSION "1.0.8"
 #define FIRMWARE_MANIFEST_URL "https://mqtt.app2-server.kr/firmware/sprout-grower/latest.json"
 
 
@@ -66,6 +66,7 @@ static const int BUZZER_PIN     = 22;
 // =======================================================
 // 시스템 전원(논리적 ON/OFF)
 // =======================================================
+bool powerEnabled = true;
 bool systemEnabled = false;
 
 static const unsigned long TOUCH_DEBOUNCE_MS = 80;
@@ -285,7 +286,8 @@ bool consumeOtaPowerOnAfterReboot() {
 }
 
 void restorePowerOnAfterOta() {
-  systemEnabled = true;
+    powerEnabled = true;
+    systemEnabled = true;
   resetRuntimeState();
   touchPowerLedUntil = millis() + TOUCH_POWER_LED_ON_MS;
   autoImmediateRunPending = true;
@@ -384,7 +386,7 @@ void updateFanControl() {
 
   unsigned long now = millis();
 
-  if (!systemEnabled) {
+  if (!powerEnabled || !systemEnabled) {
     clearFanSchedule();
     return;
   }
@@ -566,7 +568,7 @@ void abortAllAutoProcesses(const char* reason) {
 }
 
 void scheduleNextAutoRunFromNow(const char* reason) {
-  if (!systemEnabled || !interlockOk()) {
+  if (!powerEnabled || !systemEnabled || !interlockOk()) {
     return;
   }
 
@@ -634,7 +636,7 @@ void updateAutoSequence() {
     return;
   }
 
-  if (!systemEnabled) {
+  if (!powerEnabled || !systemEnabled) {
     autoAbort("system disabled");
     autoPrevInterlock = false;
     return;
@@ -734,6 +736,10 @@ void updateTouchToggle() {
 
   unsigned long now = millis();
 
+  if (!powerEnabled) {
+    return;
+  }
+
   if (!systemEnabled) {
     if (touchStable == HIGH && !touchToggleLock) {
       touchToggleLock = true;
@@ -811,7 +817,7 @@ void updateWifiLed27() {
 
   ensureLedc();
 
-  if (!systemEnabled) {
+  if (!powerEnabled || !systemEnabled) {
     ledcWrite((uint8_t)LED_NET_PIN, 0);
     return;
   }
@@ -829,7 +835,7 @@ void updateSafetyLed14() {
 
   ensureLedc();
 
-  if (!systemEnabled) {
+  if (!powerEnabled || !systemEnabled) {
     ledcWrite((uint8_t)LED_SAFE_PIN, 0);
     return;
   }
@@ -855,7 +861,7 @@ void updateSafetyLed14() {
 void updatePowerLed22() {
   if (firmwareUpdateInProgress) return;
 
-  digitalWrite(LED_POWER_PIN, systemEnabled ? HIGH : LOW);
+  digitalWrite(LED_POWER_PIN, (powerEnabled && systemEnabled) ? HIGH : LOW);
 }
 
 // =======================================================
@@ -872,7 +878,7 @@ void applyPumpRequest() {
     return;
   }
 
-  if (!systemEnabled) {
+  if (!powerEnabled || !systemEnabled) {
     setPumpTarget(0);
     prevWantOn = false;
     pumpOn = false;
@@ -1085,6 +1091,7 @@ void handleStatus() {
   json += "\"latest_firmware_version\":\"" + latestFirmwareVersion + "\",";
   json += "\"update_status\":\"" + updateStatus + "\",";
   json += "\"update_progress\":" + String(updateProgress) + ",";
+  json += "\"power_enabled\":" + String(powerEnabled ? "true" : "false") + ",";
   json += "\"system_enabled\":" + String(systemEnabled ? "true" : "false") + ",";
   json += "\"sta_status\":\"" + wifiStatusToStr(WiFi.status()) + "\",";
   json += "\"sta_connected\":" + String(staConnected ? "true" : "false") + ",";
@@ -1230,7 +1237,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len) {
   for (unsigned int i = 0; i < len; i++) msg += (char)payload[i];
   msg.trim();
 
-  if (!systemEnabled) {
+  if (!powerEnabled || !systemEnabled) {
     Serial.println("[MQTT] ignored because system is OFF");
     return;
   }
@@ -1502,6 +1509,7 @@ void sendWsState() {
   state["update_status"] = updateStatus;
   state["update_progress"] = updateProgress;
 
+  state["power_enabled"] = powerEnabled;
   state["system_enabled"] = systemEnabled;
   state["sta_connected"] = staConnected;
   state["interlock_ok"] = interlockOk();
@@ -1520,8 +1528,26 @@ void sendWsState() {
 }
 
 bool applyAppCommand(String command, bool value) {
-  if (command == "running") {
+  if (command == "power") {
+    powerEnabled = value;
     abortAllAutoProcesses("app power command");
+
+    if (!powerEnabled) {
+      systemEnabled = false;
+      manualPumpUntil = 0;
+      manualFanUntil = 0;
+      resetRuntimeState();
+      beepPowerOff();
+    } else {
+      beepPowerOn();
+    }
+
+  } else if (command == "firmwareUpdate") {
+    startFirmwareUpdate();
+  } else if (!powerEnabled) {
+    return false;
+  } else if (command == "running") {
+    abortAllAutoProcesses("app running command");
     systemEnabled = value;
 
     if (!systemEnabled) {
@@ -1570,8 +1596,6 @@ bool applyAppCommand(String command, bool value) {
     fanManualOverride = false;
     setFan(false);
     scheduleNextAutoRunFromNow("auto command");
-  } else if (command == "firmwareUpdate") {
-    startFirmwareUpdate();
   } else {
     return false;
   }

@@ -40,6 +40,7 @@ export const starterDevices: Device[] = [
     status: 'online',
     ipAddress: '192.168.4.21',
     controls: {
+      power: true,
       water: false,
       fan: true,
       cleanMode: false,
@@ -78,6 +79,7 @@ export function createDevice(params: {
     status: params.ipAddress ? 'online' : 'setup',
     ipAddress: params.ipAddress,
     controls: {
+      power: false,
       water: false,
       fan: false,
       cleanMode: false,

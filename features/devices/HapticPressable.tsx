@@ -54,6 +54,15 @@ export function triggerToggleHaptic(nextValue: boolean) {
   );
 }
 
+export function triggerWheelTickHaptic() {
+  trigger(
+    Platform.OS === 'android'
+      ? HapticFeedbackTypes.effectTick
+      : HapticFeedbackTypes.selection,
+    defaultHapticOptions,
+  );
+}
+
 function HapticPressable({
   disabled,
   hapticOptions,

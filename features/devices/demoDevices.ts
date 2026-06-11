@@ -52,6 +52,7 @@ export function createDemoProvisionedDevice(params: {
     status: 'online',
     ipAddress: params.ipAddress ?? demoProvisionedIp,
     controls: {
+      power: true,
       running: true,
       water: false,
       fan: true,
@@ -68,6 +69,7 @@ export function createDemoProvisionedDevice(params: {
       latestFirmwareVersion: '1.0.4',
       firmwareUpdateStatus: 'available',
       firmwareUpdateProgress: 0,
+      powerControlSupported: true,
       lastSeenAt: Date.now(),
     },
   };

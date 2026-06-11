@@ -3,6 +3,7 @@ export type DeviceType = 'sprout-grower' | 'future-device';
 export type DeviceStatus = 'online' | 'offline' | 'setup';
 
 export type DeviceControls = {
+  power: boolean;
   water: boolean;
   fan: boolean;
   cleanMode: boolean;
@@ -30,6 +31,7 @@ export type DeviceRuntime = {
   latestFirmwareVersion?: string;
   firmwareUpdateStatus?: FirmwareUpdateStatus;
   firmwareUpdateProgress?: number;
+  powerControlSupported?: boolean;
   lastSeenAt?: number;
 };
 

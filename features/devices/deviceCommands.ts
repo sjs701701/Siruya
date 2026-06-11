@@ -4,6 +4,7 @@ import {
   DeviceCommand,
   FirmwareUpdateStatus,
 } from './types';
+import {hasDeviceCommandRoute} from './deviceControl';
 import {sendWebSocketDeviceCommand} from './deviceWebSocket';
 import {
   autoStateFromDeviceCode,
@@ -16,6 +17,7 @@ export type DeviceCommandResponse = {
 };
 
 type Esp32StatusResponse = {
+  power_enabled?: boolean;
   system_enabled?: boolean;
   sta_connected?: boolean;
   interlock_ok?: boolean;
@@ -48,6 +50,8 @@ function createCommandPayload(params: {
 
 export type DeviceStatusSnapshot = {
   online: boolean;
+  power?: boolean;
+  powerControlSupported: boolean;
   running: boolean;
   water: boolean;
   fan: boolean;
@@ -74,20 +78,29 @@ function getDeviceBaseUrl(device: Device) {
   return `http://${device.ipAddress}`;
 }
 
-export async function sendDeviceCommand(params: {
+function ensureDeviceCommandRoute(device: Device) {
+  if (device.isDemo) {
+    return;
+  }
+
+  if (!device.commandToken) {
+    throw new Error('DEVICE_COMMAND_TOKEN_MISSING');
+  }
+
+  if (!hasDeviceCommandRoute(device)) {
+    throw new Error('DEVICE_COMMAND_ROUTE_MISSING');
+  }
+}
+
+function shouldUseWebSocketOnly(device: Device) {
+  return Boolean(device.hardwareId && !device.ipAddress);
+}
+
+async function sendLocalDeviceCommand(params: {
   device: Device;
-  command: DeviceCommand;
+  command: DeviceCommand | 'firmwareUpdate';
   value: boolean;
 }) {
-  if (params.device.isDemo) {
-    return {ok: true, message: 'DEMO_COMMAND_OK'};
-  }
-
-  if (params.device.hardwareId) {
-    await sendWebSocketDeviceCommand(params);
-    return {ok: true};
-  }
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
 
@@ -113,12 +126,43 @@ export async function sendDeviceCommand(params: {
   }
 }
 
+export async function sendDeviceCommand(params: {
+  device: Device;
+  command: DeviceCommand;
+  value: boolean;
+}) {
+  if (params.device.isDemo) {
+    return {ok: true, message: 'DEMO_COMMAND_OK'};
+  }
+
+  ensureDeviceCommandRoute(params.device);
+
+  if (shouldUseWebSocketOnly(params.device)) {
+    await sendWebSocketDeviceCommand(params);
+    return {ok: true};
+  }
+
+  try {
+    return await sendLocalDeviceCommand(params);
+  } catch (error) {
+    try {
+      await sendWebSocketDeviceCommand(params);
+    } catch {
+      throw error;
+    }
+
+    return {ok: true};
+  }
+}
+
 export async function fetchDeviceStatus(
   device: Device,
 ): Promise<DeviceStatusSnapshot> {
   if (device.isDemo) {
     return {
       online: device.status === 'online',
+      power: device.controls.power,
+      powerControlSupported: true,
       running: device.controls.running,
       water: device.controls.water,
       fan: device.controls.fan,
@@ -155,8 +199,12 @@ export async function fetchDeviceStatus(
       autoState === 'preparing' ||
       autoState === 'watering';
 
+    const powerControlSupported = typeof data.power_enabled === 'boolean';
+
     return {
       online: Boolean(data.sta_connected),
+      power: powerControlSupported ? Boolean(data.power_enabled) : undefined,
+      powerControlSupported,
       running: Boolean(data.system_enabled),
       water: Boolean(data.pump_on),
       fan: Boolean(data.fan_on),
@@ -183,7 +231,9 @@ export async function sendFirmwareUpdateCommand(device: Device) {
     return {ok: true, message: 'DEMO_FIRMWARE_UPDATE_OK'};
   }
 
-  if (device.hardwareId) {
+  ensureDeviceCommandRoute(device);
+
+  if (shouldUseWebSocketOnly(device)) {
     await sendWebSocketDeviceCommand({
       device,
       command: 'firmwareUpdate',
@@ -192,33 +242,23 @@ export async function sendFirmwareUpdateCommand(device: Device) {
     return {ok: true};
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-
   try {
-    const response = await fetch(`${getDeviceBaseUrl(device)}/command`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(
-        createCommandPayload({
-          command: 'firmwareUpdate',
-          device,
-          value: true,
-        }),
-      ),
-      signal: controller.signal,
+    return await sendLocalDeviceCommand({
+      command: 'firmwareUpdate',
+      device,
+      value: true,
     });
-    const text = await response.text();
-    const data = text ? (JSON.parse(text) as DeviceCommandResponse) : {};
-
-    if (!response.ok || data.ok === false) {
-      throw new Error(data.message ?? `COMMAND_FAILED_${response.status}`);
+  } catch (error) {
+    try {
+      await sendWebSocketDeviceCommand({
+        device,
+        command: 'firmwareUpdate',
+        value: true,
+      });
+    } catch {
+      throw error;
     }
 
-    return data;
-  } finally {
-    clearTimeout(timeout);
+    return {ok: true};
   }
 }

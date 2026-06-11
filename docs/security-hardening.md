@@ -47,6 +47,40 @@ The cloud WebSocket server must enforce these rules before external testing:
 5. Forward and verify the per-device `token` field on `command` messages.
 6. Never auto-bind unclaimed online devices to the first app that connects.
 
+## Release blocker: cloud command routing
+
+Observed on 2026-06-10 with test device `840ff0a4`:
+
+- The app WebSocket received `state` frames from the device every 3 seconds.
+- The same app WebSocket received `hello_ok` with an empty `devices` list.
+- Sending a no-op command through the cloud WebSocket returned
+  `command_error` with `device offline`.
+- Local HTTP command to the same device succeeded after discovering its local
+  IP (`POST http://192.168.35.182/command` returned `{"ok":true}`).
+
+This means the cloud server can forward device state to apps while still
+treating the device as unavailable for command routing. The likely server-side
+failure is that device liveness/state broadcast and command routing are backed
+by different connection maps, or `device_hello` does not register the device in
+the command routing map used by app commands.
+
+Temporary development mitigation:
+
+- The app now prefers local HTTP commands when a stored `ipAddress` is present.
+- Cloud WebSocket command routing remains a fallback path only.
+- The currently connected test app storage was patched with
+  `ipAddress: 192.168.35.182` for device `840ff0a4`.
+
+Release acceptance criteria:
+
+- `app_hello` must report online devices consistently with devices that are
+  actively sending `state`.
+- A valid app command for an online owned device must be forwarded to that
+  exact device connection instead of returning `device offline`.
+- The server must return a clear error for unauthorized, unknown, and truly
+  offline devices as separate cases.
+- The app should not need a local LAN IP for normal production control.
+
 ## Firmware manifest requirement
 
 The sprout-grower manifest must include:

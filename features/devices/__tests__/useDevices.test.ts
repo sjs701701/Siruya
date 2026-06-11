@@ -68,6 +68,7 @@ function createDevice(overrides: DeviceOverrides = {}): Device {
     room: 'Kitchen',
     status: 'online',
     controls: {
+      power: false,
       water: false,
       fan: false,
       cleanMode: false,
@@ -351,6 +352,76 @@ describe('useDevices device contact freshness', () => {
     }).not.toThrow();
 
     expect(latestApi?.devices).toBe(previousDevices);
+
+    await ReactTestRenderer.act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('applies websocket power support and power state', async () => {
+    let latestApi: ReturnType<typeof useDevices> | undefined;
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(
+        React.createElement(UseDevicesObserver, {
+          onChange: api => {
+            latestApi = api;
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      latestApi?.addDevice(
+        createDevice({
+          id: 'cloud-device',
+          hardwareId: 'HW-1',
+          status: 'offline',
+          controls: {
+            power: false,
+          },
+        }),
+      );
+    });
+
+    await ReactTestRenderer.act(async () => {
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: {
+          power_enabled: true,
+          sta_connected: true,
+          system_enabled: true,
+          interlock_ok: true,
+          pump_on: false,
+          fan_on: false,
+          auto_state: 0,
+        },
+      });
+    });
+
+    expect(latestApi?.devices[0].controls.power).toBe(true);
+    expect(latestApi?.devices[0].runtime?.powerControlSupported).toBe(true);
+    expect(latestApi?.devices[0].controls.running).toBe(true);
+
+    await ReactTestRenderer.act(async () => {
+      mockDeviceWebSocketListener?.({
+        type: 'state',
+        deviceId: 'HW-1',
+        state: {
+          sta_connected: true,
+          system_enabled: true,
+          interlock_ok: true,
+          pump_on: false,
+          fan_on: false,
+          auto_state: 0,
+        },
+      });
+    });
+
+    expect(latestApi?.devices[0].controls.power).toBe(true);
+    expect(latestApi?.devices[0].runtime?.powerControlSupported).toBe(false);
 
     await ReactTestRenderer.act(async () => {
       renderer?.unmount();

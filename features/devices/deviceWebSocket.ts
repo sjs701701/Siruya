@@ -4,6 +4,7 @@ export const DEVICE_WS_URL = 'wss://mqtt.app2-server.kr/ws';
 const DEVICE_CONTACT_STALE_MS = 15000;
 
 export type DeviceWsState = {
+  power_enabled?: boolean;
   system_enabled?: boolean;
   sta_connected?: boolean;
   interlock_ok?: boolean;

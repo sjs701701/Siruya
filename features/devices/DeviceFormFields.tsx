@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
   controlTitle: {
     color: '#111827',
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   controlDescription: {
     color: '#64748b',
@@ -102,7 +102,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     color: '#334155',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     marginBottom: 8,
   },
   input: {

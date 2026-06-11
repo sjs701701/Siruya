@@ -1128,12 +1128,12 @@ const styles = StyleSheet.create({
   closeText: {
     color: '#111827',
     fontSize: 24,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   title: {
     color: '#111827',
     fontSize: 19,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   progress: {
     flexDirection: 'row',
@@ -1177,7 +1177,7 @@ const styles = StyleSheet.create({
   demoTitle: {
     color: '#155e75',
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   demoText: {
     color: '#0f766e',
@@ -1197,7 +1197,7 @@ const styles = StyleSheet.create({
   demoButtonText: {
     color: '#ffffff',
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   demoBadge: {
     alignSelf: 'flex-start',
@@ -1210,7 +1210,7 @@ const styles = StyleSheet.create({
   demoBadgeText: {
     color: '#155e75',
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   demoInlineNotice: {
     backgroundColor: '#ecfeff',
@@ -1265,7 +1265,7 @@ const styles = StyleSheet.create({
   productBadgeText: {
     color: '#0369a1',
     fontSize: 28,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   productDots: {
     flexDirection: 'row',
@@ -1289,7 +1289,7 @@ const styles = StyleSheet.create({
   productTitle: {
     color: '#111827',
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '800',
     textAlign: 'center',
   },
   productCaption: {
@@ -1307,12 +1307,12 @@ const styles = StyleSheet.create({
   guideNumber: {
     color: '#1d9bf0',
     fontSize: 38,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   guideTitle: {
     color: '#111827',
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '800',
     marginTop: 8,
   },
   guideText: {
@@ -1347,7 +1347,7 @@ const styles = StyleSheet.create({
   wifiTitle: {
     color: '#111111',
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   wifiHeaderNotice: {
     color: '#5f5f5f',
@@ -1472,12 +1472,12 @@ const styles = StyleSheet.create({
   lockIcon: {
     color: '#5f5f5f',
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   signalIcon: {
     color: '#5f5f5f',
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   infoIcon: {
     borderColor: '#111111',
@@ -1485,7 +1485,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: '#111111',
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '700',
     height: 18,
     lineHeight: 16,
     textAlign: 'center',
@@ -1522,7 +1522,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#3f3f3f',
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   secondaryButton: {
     flex: 1,
@@ -1530,7 +1530,7 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: '#3f3f3f',
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   overlay: {
     alignItems: 'center',
@@ -1553,7 +1553,7 @@ const styles = StyleSheet.create({
   passwordTitle: {
     color: '#111827',
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   dialogCloseButton: {
     alignItems: 'center',
@@ -1564,7 +1564,7 @@ const styles = StyleSheet.create({
   dialogCloseText: {
     color: '#111827',
     fontSize: 24,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   passwordSsid: {
     color: '#64748b',
@@ -1579,7 +1579,7 @@ const styles = StyleSheet.create({
   passwordInputLabel: {
     color: '#334155',
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '600',
     marginBottom: 8,
   },
   passwordInputRow: {
@@ -1606,7 +1606,7 @@ const styles = StyleSheet.create({
   passwordEyeText: {
     color: '#0a84ff',
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   dialogActions: {
     flexDirection: 'row',
@@ -1623,7 +1623,7 @@ const styles = StyleSheet.create({
   dialogSecondaryText: {
     color: '#334155',
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   dialogPrimaryButton: {
     alignItems: 'center',
@@ -1636,7 +1636,7 @@ const styles = StyleSheet.create({
   dialogPrimaryText: {
     color: '#ffffff',
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '700',
   },
 });
 

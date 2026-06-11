@@ -8,7 +8,6 @@ export const WATER_AUTO_CYCLE_MS = 2 * 60 * 60 * 1000;
 // 기기 상태 푸시(3초)·HTTP 폴링(5초) 주기를 덮을 만큼만 유지한다.
 const SPRAY_IMMINENT_GRACE_MS = 12 * 1000;
 
-const MIN_COUNTING_PROGRESS = 0.05;
 const PRE_SPRAY_PROGRESS = 0.97;
 
 export type AutoCyclePhase =
@@ -75,10 +74,7 @@ export function getWaterCycleProgress(
 
   const remainingMs = getRemainingAutoNextRunMs(runtime, now);
   const elapsedRatio = 1 - Math.min(remainingMs / WATER_AUTO_CYCLE_MS, 1);
-  return Math.min(
-    Math.max(elapsedRatio, MIN_COUNTING_PROGRESS),
-    PRE_SPRAY_PROGRESS,
-  );
+  return Math.min(Math.max(elapsedRatio, 0), PRE_SPRAY_PROGRESS);
 }
 
 export function hasActiveAutoCountdown(

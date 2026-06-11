@@ -51,6 +51,7 @@ function createDevice(overrides: Partial<Device> = {}): Device {
     room: 'Kitchen',
     status: 'online',
     controls: {
+      power: false,
       water: false,
       fan: false,
       cleanMode: false,

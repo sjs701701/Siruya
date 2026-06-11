@@ -3,6 +3,8 @@
 jest.mock('react-native-haptic-feedback', () => ({
   HapticFeedbackTypes: {
     effectClick: 'effectClick',
+    effectTick: 'effectTick',
+    selection: 'selection',
     toggleOff: 'toggleOff',
     toggleOn: 'toggleOn',
   },
@@ -29,9 +31,29 @@ jest.mock('react-native-video', () => {
   };
 });
 
-jest.mock('react-native-reanimated', () => ({
-  useDerivedValue: factory => ({value: factory()}),
-}));
+jest.mock('react-native-reanimated', () => {
+  const {ScrollView, Text, View} = require('react-native');
+
+  return {
+    __esModule: true,
+    default: {
+      ScrollView,
+      Text,
+      View,
+      createAnimatedComponent: component => component,
+    },
+    Extrapolation: {CLAMP: 'clamp', EXTEND: 'extend', IDENTITY: 'identity'},
+    interpolate: (_value, _input, output) => output[0],
+    interpolateColor: (_value, _input, output) => output[0],
+    runOnJS: fn => fn,
+    useAnimatedReaction: () => undefined,
+    useAnimatedRef: () => ({current: null}),
+    useAnimatedScrollHandler: () => () => undefined,
+    useAnimatedStyle: () => ({}),
+    useDerivedValue: factory => ({value: factory()}),
+    useSharedValue: initialValue => ({value: initialValue}),
+  };
+});
 
 jest.mock('@shopify/react-native-skia', () => ({
   Canvas: ({children, style}) => {

@@ -14,6 +14,7 @@ const baseDevice: Device = {
   room: '주방',
   status: 'online',
   controls: {
+    power: false,
     water: false,
     fan: false,
     cleanMode: false,

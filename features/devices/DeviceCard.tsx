@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   iconText: {
     color: '#334155',
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   powerButton: {
     alignItems: 'center',
@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   powerText: {
     color: '#475569',
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   powerTextActive: {
     color: '#ffffff',
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   autoBadgeText: {
     color: '#ffffff',
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   demoBadge: {
     alignSelf: 'flex-start',
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   demoBadgeText: {
     color: '#155e75',
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   nextSprayBadge: {
     alignSelf: 'flex-start',
@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
   nextSprayText: {
     color: '#075985',
     fontSize: 11,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   signals: {
     flexDirection: 'row',
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   signalText: {
     color: '#475569',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });
 
